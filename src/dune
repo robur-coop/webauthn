@@ -1,0 +1,6 @@
+(library
+ (name webauthn)
+ (public_name webauthn)
+ (preprocess
+  (pps ppx_deriving_yojson))
+ (libraries mirage-crypto-rng yojson mirage-crypto-ec x509 base64))

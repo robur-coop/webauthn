@@ -1,0 +1,3 @@
+(library
+ (name flash_message)
+ (libraries dream))

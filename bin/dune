@@ -1,0 +1,8 @@
+(executable
+ (public_name webauthn_demo)
+ (name webauthn_demo)
+ (modules webauthn_demo template)
+ (preprocessor_deps base64.js)
+ (preprocess (pps ppx_blob))
+ (libraries webauthn dream cmdliner logs.cli lwt flash_message)
+ (optional))
