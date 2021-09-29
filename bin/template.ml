@@ -37,12 +37,12 @@ let overview notes authenticated_as users =
   in
   page "" (String.concat "" (notes @ [authenticated_as;links;users]))
 
-let register_view user challenge userid =
+let register_view origin user challenge userid =
   let script = Printf.sprintf {|
   var publicKey = {
     challenge: Uint8Array.from(window.atob("%s"), c=>c.charCodeAt(0)),
     rp: {
-      id: "webauthn-demo.robur.coop",
+      id: "%s",
       name: "WebAuthn Demo from robur.coop"
     },
     user: {
@@ -55,7 +55,8 @@ let register_view user challenge userid =
         type: "public-key",
         alg: -7
       }
-    ]
+    ],
+    attestation: "direct"
   };
   navigator.credentials.create({ publicKey })
     .then(function (credential) {
@@ -94,7 +95,7 @@ let register_view user challenge userid =
     }).catch(function (err) {
       console.error(err);
     });
-|} challenge userid user user
+|} challenge origin userid user user
   and body =
     Printf.sprintf {|
       <p>Welcome %s.</p>
@@ -102,39 +103,58 @@ let register_view user challenge userid =
   in
   page script body
 
-let authenticate_view data user =
+let authenticate_view challenge credentials user =
   let script =
     Printf.sprintf {|
-var request = JSON.parse('%s');
-setTimeout(function() {
-        u2f.sign(
-            request.appId,
-            request.challenge,
-            request.registeredKeys,
-            function(data) {
-                if(data.errorCode) {
-                    switch (data.errorCode) {
-                        case 4:
-                            alert("This device is not registered for this account.");
-                            break;
-                        default:
-                            alert("U2F failed with error code: " + data.errorCode);
-                    }
-                    return;
-                } else {
-                    document.getElementById('token').value = JSON.stringify(data);
-                    document.getElementById('form').submit();
-                }
+    var request_options = {
+        challenge: Uint8Array.from(window.atob("%s"), c=>c.charCodeAt(0)),
+        allowCredentials: %s.map(x => { x.id = Uint8Array.from(window.atob(x.id), c=>c.charCodeAt(0)); return x }),
+    };
+    navigator.credentials.get({ publicKey: request_options })
+      .then(function (assertion) {
+        console.log(assertion);
+        let response = assertion.response;
+        let rawId = new Uint8Array(assertion.rawId);
+        let authenticatorData = new Uint8Array(assertion.response.authenticatorData);
+        let clientDataJSON = new Uint8Array(assertion.response.clientDataJSON);
+        let signature = new Uint8Array(assertion.response.signature);
+        let userHandle = assertion.response.userHandle ? new Uint8Array(assertion.response.userHandle) : null;
+ 
+        var body =
+          JSON.stringify({
+            id: assertion.id,
+            rawId: bufferEncode(rawId),
+            type: assertion.type,
+            response: {
+              authenticatorData: bufferEncode(authenticatorData),
+              clientDataJSON: bufferEncode(clientDataJSON),
+              signature: bufferEncode(signature),
+              userHandle: userHandle ? bufferEncode(userHandle) : null,
             }
-        );
-}, 1000);
-|} data
+           });
+        console.log(body);
+
+        let headers = {'Content-type': "application/json; charset=utf-8"};
+
+        let request = new Request('/authenticate_finish', { method: 'POST', body: body, headers: headers } );
+        fetch(request)
+        .then(function (response) {
+          console.log(response);
+          if (!response.ok) {
+            console.log("bad response: " + response.status);
+          };
+        });
+      }).catch(function (err) {
+        console.error(err);
+      });
+    |} challenge
+       (Yojson.to_string (`List
+         (List.map (fun credential_id ->
+            (`Assoc ["id", `String credential_id; "type", `String "public-key"]))
+          credentials)))
   and body =
     Printf.sprintf {|
-      <p>Touch your U2F token to authenticate as %S.</p>
-      <form method="POST" action="/authenticate_finish" id="form">
-         <input type="hidden" name="token" id="token"/>
-      </form>
+      <p>Touch your token to authenticate as %S.</p>
 |} user
   in
   page script body
