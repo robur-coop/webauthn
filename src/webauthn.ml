@@ -225,6 +225,7 @@ let json_string thing : Yojson.Safe.t -> (string, _) result = function
   | `String s -> Ok s
   | json -> Error (`Json_decoding (thing, "non-string", Yojson.Safe.to_string json))
 
+(* XXX: verify [origin] is in fact an origin *)
 let create origin = { origin }
 
 let rpid t =

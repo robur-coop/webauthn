@@ -178,8 +178,8 @@ let add_routes t =
   ]
 
 
-let setup_app level port host application_id https =
-  let webauthn = Webauthn.create application_id in
+let setup_app level port host origin https =
+  let webauthn = Webauthn.create origin in
   let level = match level with None -> None | Some Logs.Debug -> Some `Debug | Some Info -> Some `Info | Some Warning -> Some `Warning | Some Error -> Some `Error | Some App -> None in
   Dream.initialize_log ?level ();
   Dream.run ~port ~interface:host ~https
@@ -199,16 +199,16 @@ let host =
   let doc = "host" in
   Arg.(value & opt string "0.0.0.0" & info [ "h"; "host" ] ~doc)
 
-let application_id =
-  let doc = "the webauthn application id - usually protocol://host(:port)" in
-  Arg.(value & opt string "https://webauthn-demo.robur.coop" & info [ "application-id" ] ~doc)
+let origin =
+  let doc = "the webauthn relying party origin - usually protocol://host" in
+  Arg.(value & opt string "https://webauthn-demo.robur.coop" & info [ "origin" ] ~doc)
 
 let tls =
   let doc = "tls" in
   Arg.(value & flag & info [ "tls" ] ~doc)
 
 let () =
-  let term = Term.(pure setup_app $ Logs_cli.level () $ port $ host $ application_id $ tls) in
+  let term = Term.(pure setup_app $ Logs_cli.level () $ port $ host $ origin $ tls) in
   let info = Term.info "Webauthn app" ~doc:"Webauthn app" ~man:[] in
   match Term.eval (term, info) with
   | `Ok () -> exit 0
