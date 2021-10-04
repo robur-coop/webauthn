@@ -37,26 +37,25 @@ let add_routes t =
     Dream.html (Template.overview flash authenticated_as users)
   in
 
-  let register _req =
+  let register req =
     let user =
-      (* match Dream.session "authenticated_as" req with
-      | None -> *) gen_data ~alphabet:Base64.uri_safe_alphabet 8
-      (* | Some username -> username *)
-    in
-    let _key_handles = match Hashtbl.find_opt users user with
-      | None -> []
-      | Some keys -> List.map (fun (_, kh, _) -> kh) keys
+      match Dream.session "authenticated_as" req with
+      | None -> gen_data ~alphabet:Base64.uri_safe_alphabet 8
+      | Some username -> username
     in
     Dream.html (Template.register_view (Webauthn.rpid t) user)
   in
 
-  (* XXX: should we distinguish between register and authenticate challenges? *)
-  let challenge req =
+  let registration_challenge req =
     let user = Dream.param "user" req in
     let challenge = Cstruct.to_string (Mirage_crypto_rng.generate 16)
     (* [userid] should be a random value *)
     and userid = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet user in
     Hashtbl.replace challenges challenge user;
+    let credentials = match Hashtbl.find_opt users user with
+      | None -> []
+      | Some credentials -> List.map (fun (_, cid, _) -> cid) credentials
+    in
     let challenge_b64 = (Base64.encode_string challenge) in
     let json = `Assoc [
         "challenge", `String challenge_b64 ;
@@ -65,6 +64,7 @@ let add_routes t =
           "name", `String user ;
           "displayName", `String user ;
         ] ;
+        "excludeCredentials", `List (List.map (fun s -> `String (Base64.encode_string s)) credentials) ;
       ]
     in
     Logs.info (fun m -> m "produced challenge for user %s: %s" user challenge_b64);
@@ -119,7 +119,7 @@ let add_routes t =
               Dream.json "true"
             end else
               (Logs.info (fun m -> m "session_user %s, user %s" session_user user);
-               Dream.respond ~status:`Forbidden "Forbidden.")
+               Dream.json ~status:`Forbidden "false")
           | None, Some _keys ->
             Logs.app (fun m -> m "no session user");
             Dream.json ~status:`Forbidden "false"
@@ -163,19 +163,19 @@ let add_routes t =
               Flash_message.put_flash ""  "Successfully authenticated" req;
               Dream.put_session "user" user req >>= fun () ->
               Dream.put_session "authenticated_as" user req >>= fun () ->
-              Dream.redirect req "/"
+              Dream.json "true"
             end else begin
               Logs.warn (fun m -> m "credential %S for user %S: counter not strictly increasing! \
                 Got %ld, expected >%ld. webauthn device compromised?"
                 (fst credential) user counter (KhPubHashtbl.find counters credential));
               Flash_message.put_flash "" "Authentication failure: key compromised?" req;
-              Dream.redirect req "/"
+              Dream.json "false"
             end
           | Error e ->
             Logs.warn (fun m -> m "error %a" Webauthn.pp_error e);
             let err = to_string e in
             Flash_message.put_flash "" ("Authentication failure: " ^ err) req;
-            Dream.redirect req "/"
+            Dream.json "false"
   in
 
   let logout req =
@@ -191,7 +191,7 @@ let add_routes t =
   Dream.router [
     Dream.get "/" main;
     Dream.get "/register" register;
-    Dream.get "/challenge/:user" challenge;
+    Dream.get "/registration-challenge/:user" registration_challenge;
     Dream.post "/register_finish" register_finish;
     Dream.get "/authenticate/:user" authenticate;
     Dream.post "/authenticate_finish" authenticate_finish;

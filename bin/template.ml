@@ -62,29 +62,24 @@ let register_view origin user =
           alg: -7
         }
       ],
-      attestation: "direct"
+      attestation: "direct",
+      excludeCredentials: challengeData.excludeCredentials.map(id => ({ type: "public-key",
+        id: Uint8Array.from(window.atob(id), c=>c.charCodeAt(0))}))
     };
   }
   function do_register(username) {
-    fetch("/challenge/"+username)
+    fetch("/registration-challenge/"+username)
       .then(response => response.json())
       .then(function (challengeData) {
-        console.log("got challenge data");
-        console.log(challengeData);
         let publicKey = makePublicKey(challengeData);
         navigator.credentials.create({ publicKey })
           .then(function (credential) {
-          // send attestation response and client extensions
-          // to the server to proceed with the registration
-          // of the credential
-            console.log(credential);
-            // Move data into Arrays incase it is super long
             let response = credential.response;
             let attestationObject = new Uint8Array(response.attestationObject);
             let clientDataJSON = new Uint8Array(response.clientDataJSON);
             let rawId = new Uint8Array(credential.rawId);
 
-            var body =
+            let body =
               JSON.stringify({
                 id: credential.id,
                 rawId: bufferEncode(rawId),
@@ -94,16 +89,14 @@ let register_view origin user =
                   clientDataJSON: bufferEncode(clientDataJSON),
                 },
               });
-            console.log(body);
 
             let headers = {'Content-type': "application/json; charset=utf-8"};
 
             let request = new Request('/register_finish', { method: 'POST', body: body, headers: headers } );
             fetch(request)
             .then(function (response) {
-              console.log(response);
               if (!response.ok && response.status != 403) {
-                console.log("bad response: " + response.status);
+                alert("bad response: " + response.status);
                 return
               };
               response.json().then(function (success) {
@@ -112,7 +105,7 @@ let register_view origin user =
               });
             });
           }).catch(function (err) {
-            console.error(err);
+            alert("exception: " + err);
           });
       });
   }
@@ -135,13 +128,12 @@ let register_view origin user =
 let authenticate_view challenge credentials user =
   let script =
     Printf.sprintf {|
-    var request_options = {
+    let request_options = {
         challenge: Uint8Array.from(window.atob("%s"), c=>c.charCodeAt(0)),
         allowCredentials: %s.map(x => { x.id = Uint8Array.from(window.atob(x.id), c=>c.charCodeAt(0)); return x }),
     };
     navigator.credentials.get({ publicKey: request_options })
       .then(function (assertion) {
-        console.log(assertion);
         let response = assertion.response;
         let rawId = new Uint8Array(assertion.rawId);
         let authenticatorData = new Uint8Array(assertion.response.authenticatorData);
@@ -149,7 +141,7 @@ let authenticate_view challenge credentials user =
         let signature = new Uint8Array(assertion.response.signature);
         let userHandle = assertion.response.userHandle ? new Uint8Array(assertion.response.userHandle) : null;
  
-        var body =
+        let body =
           JSON.stringify({
             id: assertion.id,
             rawId: bufferEncode(rawId),
@@ -161,20 +153,24 @@ let authenticate_view challenge credentials user =
               userHandle: userHandle ? bufferEncode(userHandle) : null,
             }
            });
-        console.log(body);
 
         let headers = {'Content-type': "application/json; charset=utf-8"};
 
         let request = new Request('/authenticate_finish', { method: 'POST', body: body, headers: headers } );
         fetch(request)
         .then(function (response) {
-          console.log(response);
           if (!response.ok) {
-            console.log("bad response: " + response.status);
+            alert("bad response: " + response.status);
+            window.location = "/";
+            return
           };
+          response.json().then(function (success) {
+            alert(success ? "Successfully authenticated!" : "Failed to authenticate :(");
+            window.location = "/";
+          });
         });
       }).catch(function (err) {
-        console.error(err);
+        alert("exception: " + err);
       });
     |} challenge
        (Yojson.to_string (`List
