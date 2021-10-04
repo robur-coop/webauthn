@@ -31,8 +31,11 @@ let overview notes authenticated_as users =
     String.concat ""
       ("<h2>Users</h2><ul>" ::
        Hashtbl.fold (fun name keys acc ->
-           let handles = List.map (fun (_, h, _) -> h) keys in
-           (Printf.sprintf "<li>%s [<a href=/authenticate/%s>authenticate</a>] (%s)</li>" name name (String.concat ", " handles)) :: acc)
+           let credentials = List.map (fun (_, cid, _) ->
+               Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet cid)
+               keys
+           in
+           (Printf.sprintf "<li>%s [<a href=/authenticate/%s>authenticate</a>] (%s)</li>" name name (String.concat ", " credentials)) :: acc)
          users [] @ [ "</ul>" ])
   in
   page "" (String.concat "" (notes @ [authenticated_as;links;users]))
