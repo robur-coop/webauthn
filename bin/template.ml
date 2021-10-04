@@ -42,7 +42,7 @@ let overview notes authenticated_as users =
 
 let register_view origin user =
   let script = Printf.sprintf {|
-  function makePublicKey(challengeData) {
+  function makePublicKey(challengeData, attestation) {
     let challenge = Uint8Array.from(window.atob(challengeData.challenge), c=>c.charCodeAt(0));
     let user_id = Uint8Array.from(window.atob(challengeData.user.id), c=>c.charCodeAt(0));
     return {
@@ -62,16 +62,16 @@ let register_view origin user =
           alg: -7
         }
       ],
-      attestation: "direct",
+      attestation: attestation,
       excludeCredentials: challengeData.excludeCredentials.map(id => ({ type: "public-key",
         id: Uint8Array.from(window.atob(id), c=>c.charCodeAt(0))}))
     };
   }
-  function do_register(username) {
+  function do_register(username, attestation) {
     fetch("/registration-challenge/"+username)
       .then(response => response.json())
       .then(function (challengeData) {
-        let publicKey = makePublicKey(challengeData);
+        let publicKey = makePublicKey(challengeData, attestation);
         navigator.credentials.create({ publicKey })
           .then(function (credential) {
             let response = credential.response;
@@ -92,7 +92,7 @@ let register_view origin user =
 
             let headers = {'Content-type': "application/json; charset=utf-8"};
 
-            let request = new Request('/register_finish', { method: 'POST', body: body, headers: headers } );
+            let request = new Request('/register_finish/'+username, { method: 'POST', body: body, headers: headers } );
             fetch(request)
             .then(function (response) {
               if (!response.ok && response.status != 403) {
@@ -111,7 +111,8 @@ let register_view origin user =
   }
   function doit() {
     let username = document.getElementById("username").value;
-    return do_register(username);
+    let attestation = document.getElementById("attestation").value;
+    return do_register(username, attestation);
   }
 |} origin
   and body =
@@ -119,6 +120,11 @@ let register_view origin user =
       <p>Welcome.</p>
       <form method="post" id="form" onsubmit="return false;">
         <label for="username" >Desired username</label><input name="username" id="username" value="%s"/>
+        <label for="attestation">Attestation type</label><select name="attestation" id="attestation">
+          <option value="direct">direct</option>
+          <option value="indirect">indirect</option>
+          <option value="none">none</option>
+        </select>
         <button id="button" type="button" onclick="doit()">Register</button>
       </form>
 |} user
@@ -155,8 +161,8 @@ let authenticate_view challenge credentials user =
            });
 
         let headers = {'Content-type': "application/json; charset=utf-8"};
-
-        let request = new Request('/authenticate_finish', { method: 'POST', body: body, headers: headers } );
+        let username = window.location.pathname.substring("/authenticate/".length);
+        let request = new Request('/authenticate_finish/'+username, { method: 'POST', body: body, headers: headers } );
         fetch(request)
         .then(function (response) {
           if (!response.ok) {
