@@ -10,7 +10,6 @@ type error = [
   | `Rpid_hash_mismatch of Cstruct.t * Cstruct.t
   | `Missing_credential_data
   | `Msg of string
-  | `None
 ]
 
 let pp_error ppf = function
@@ -30,7 +29,6 @@ let pp_error ppf = function
     Fmt.pf ppf "rpid hash mismatch: expected %a received %a" Cstruct.hexdump_pp should Cstruct.hexdump_pp is
   | `Missing_credential_data -> Fmt.string ppf "missing credential data"
   | `Msg msg -> Fmt.pf ppf "error %s" msg
-  | `None -> Fmt.string ppf "error none"
 
 type t = {
   origin : string;
