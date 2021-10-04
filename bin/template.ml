@@ -40,68 +40,94 @@ let overview notes authenticated_as users =
   in
   page "" (String.concat "" (notes @ [authenticated_as;links;users]))
 
-let register_view origin user challenge userid =
+let register_view origin user =
   let script = Printf.sprintf {|
-  var publicKey = {
-    challenge: Uint8Array.from(window.atob("%s"), c=>c.charCodeAt(0)),
-    rp: {
-      id: "%s",
-      name: "WebAuthn Demo from robur.coop"
-    },
-    user: {
-      id: Uint8Array.from(window.atob("%s"), c=>c.charCodeAt(0)),
-      displayName: "%s",
-      name: "%s"
-    },
-    pubKeyCredParams: [
-      {
-        type: "public-key",
-        alg: -7
-      }
-    ],
-    attestation: "direct"
-  };
-  navigator.credentials.create({ publicKey })
-    .then(function (credential) {
-    // send attestation response and client extensions
-    // to the server to proceed with the registration
-    // of the credential
-      console.log(credential);
-      // Move data into Arrays incase it is super long
-      let response = credential.response;
-      let attestationObject = new Uint8Array(response.attestationObject);
-      let clientDataJSON = new Uint8Array(response.clientDataJSON);
-      let rawId = new Uint8Array(credential.rawId);
+  function makePublicKey(challengeData) {
+    let challenge = Uint8Array.from(window.atob(challengeData.challenge), c=>c.charCodeAt(0));
+    let user_id = Uint8Array.from(window.atob(challengeData.user.id), c=>c.charCodeAt(0));
+    return {
+      challenge: challenge,
+      rp: {
+        id: "%s",
+        name: "WebAuthn Demo from robur.coop"
+      },
+      user: {
+        id: user_id,
+        displayName: challengeData.user.displayName,
+        name: challengeData.user.name
+      },
+      pubKeyCredParams: [
+        {
+          type: "public-key",
+          alg: -7
+        }
+      ],
+      attestation: "direct"
+    };
+  }
+  function do_register(username) {
+    fetch("/challenge/"+username)
+      .then(response => response.json())
+      .then(function (challengeData) {
+        console.log("got challenge data");
+        console.log(challengeData);
+        let publicKey = makePublicKey(challengeData);
+        navigator.credentials.create({ publicKey })
+          .then(function (credential) {
+          // send attestation response and client extensions
+          // to the server to proceed with the registration
+          // of the credential
+            console.log(credential);
+            // Move data into Arrays incase it is super long
+            let response = credential.response;
+            let attestationObject = new Uint8Array(response.attestationObject);
+            let clientDataJSON = new Uint8Array(response.clientDataJSON);
+            let rawId = new Uint8Array(credential.rawId);
 
-      var body =
-        JSON.stringify({
-          id: credential.id,
-          rawId: bufferEncode(rawId),
-          type: credential.type,
-          response: {
-            attestationObject: bufferEncode(attestationObject),
-            clientDataJSON: bufferEncode(clientDataJSON),
-          },
-        });
-      console.log(body);
+            var body =
+              JSON.stringify({
+                id: credential.id,
+                rawId: bufferEncode(rawId),
+                type: credential.type,
+                response: {
+                  attestationObject: bufferEncode(attestationObject),
+                  clientDataJSON: bufferEncode(clientDataJSON),
+                },
+              });
+            console.log(body);
 
-      let headers = {'Content-type': "application/json; charset=utf-8"};
+            let headers = {'Content-type': "application/json; charset=utf-8"};
 
-      let request = new Request('/register_finish', { method: 'POST', body: body, headers: headers } );
-      fetch(request)
-      .then(function (response) {
-        console.log(response);
-        if (!response.ok) {
-          console.log("bad response: " + response.status);
-        };
+            let request = new Request('/register_finish', { method: 'POST', body: body, headers: headers } );
+            fetch(request)
+            .then(function (response) {
+              console.log(response);
+              if (!response.ok && response.status != 403) {
+                console.log("bad response: " + response.status);
+                return
+              };
+              response.json().then(function (success) {
+                alert(success ? "Successfully registered!" : "Failed to register :(");
+                window.location = "/";
+              });
+            });
+          }).catch(function (err) {
+            console.error(err);
+          });
       });
-    }).catch(function (err) {
-      console.error(err);
-    });
-|} challenge origin userid user user
+  }
+  function doit() {
+    let username = document.getElementById("username").value;
+    return do_register(username);
+  }
+|} origin
   and body =
     Printf.sprintf {|
-      <p>Welcome %s.</p>
+      <p>Welcome.</p>
+      <form method="post" id="form" onsubmit="return false;">
+        <label for="username" >Desired username</label><input name="username" id="username" value="%s"/>
+        <button id="button" type="button" onclick="doit()">Register</button>
+      </form>
 |} user
   in
   page script body

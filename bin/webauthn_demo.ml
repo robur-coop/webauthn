@@ -37,7 +37,7 @@ let add_routes t =
     Dream.html (Template.overview flash authenticated_as users)
   in
 
-  let register req =
+  let register _req =
     let user =
       (* match Dream.session "authenticated_as" req with
       | None -> *) gen_data ~alphabet:Base64.uri_safe_alphabet 8
@@ -47,12 +47,29 @@ let add_routes t =
       | None -> []
       | Some keys -> List.map (fun (_, kh, _) -> kh) keys
     in
+    Dream.html (Template.register_view (Webauthn.rpid t) user)
+  in
+
+  (* XXX: should we distinguish between register and authenticate challenges? *)
+  let challenge req =
+    let user = Dream.param "user" req in
     let challenge = Cstruct.to_string (Mirage_crypto_rng.generate 16)
-    and userid = Base64.encode_string user
-    in
+    (* [userid] should be a random value *)
+    and userid = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet user in
     Hashtbl.replace challenges challenge user;
+    let challenge_b64 = (Base64.encode_string challenge) in
+    let json = `Assoc [
+        "challenge", `String challenge_b64 ;
+        "user", `Assoc [
+          "id", `String userid ;
+          "name", `String user ;
+          "displayName", `String user ;
+        ] ;
+      ]
+    in
+    Logs.info (fun m -> m "produced challenge for user %s: %s" user challenge_b64);
     Dream.put_session "challenge" challenge req >>= fun () ->
-    Dream.html (Template.register_view (Webauthn.rpid t) user (Base64.encode_string challenge) userid)
+    Dream.json (Yojson.Safe.to_string json)
   in
 
   let register_finish req =
@@ -68,7 +85,7 @@ let add_routes t =
         Logs.warn (fun m -> m "error %a" Webauthn.pp_error e);
         let err = to_string e in
         Flash_message.put_flash "" ("Registration failed " ^ err) req;
-        Dream.redirect req "/"
+        Dream.json "false"
       | Ok (_aaguid, credential_id, pubkey, _client_extensions, user_present,
             user_verified, sig_count, _authenticator_extensions, attestation_cert) ->
         ignore (check_counter (credential_id, pubkey) sig_count);
@@ -79,29 +96,33 @@ let add_routes t =
           Dream.respond ~status:`Internal_Server_Error
             "Internal server error: couldn't find user for challenge"
         | Some user ->
+          Logs.app (fun m -> m "challenge for user %S" user);
           Hashtbl.remove challenges challenge;
           match Dream.session "authenticated_as" req, Hashtbl.find_opt users user with
           | _, None ->
-            Logs.app (fun m -> m "registered %s" user);
+            Logs.app (fun m -> m "registered %s: %S" user credential_id);
             Hashtbl.replace users user [ (pubkey, credential_id, attestation_cert) ];
             Dream.invalidate_session req >>= fun () ->
             Flash_message.put_flash ""
               (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a>" user user)
               req;
-            Dream.redirect req "/"
+            Dream.json "true"
           | Some session_user, Some keys ->
+            Logs.app (fun m -> m "user %S session_user %S" user session_user);
             if String.equal user session_user then begin
-              Logs.app (fun m -> m "registered %s" user);
+              Logs.app (fun m -> m "registered %s: %S" user credential_id);
               Hashtbl.replace users user ((pubkey, credential_id, attestation_cert) :: keys) ;
               Dream.invalidate_session req >>= fun () ->
               Flash_message.put_flash ""
                 (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a>" user user)
                 req;
-              Dream.redirect req "/"
+              Dream.json "true"
             end else
-              Dream.respond ~status:`Forbidden "Forbidden."
+              (Logs.info (fun m -> m "session_user %s, user %s" session_user user);
+               Dream.respond ~status:`Forbidden "Forbidden.")
           | None, Some _keys ->
-            Dream.respond ~status:`Forbidden "Forbidden."
+            Logs.app (fun m -> m "no session user");
+            Dream.json ~status:`Forbidden "false"
   in
 
   let authenticate req =
@@ -170,6 +191,7 @@ let add_routes t =
   Dream.router [
     Dream.get "/" main;
     Dream.get "/register" register;
+    Dream.get "/challenge/:user" challenge;
     Dream.post "/register_finish" register_finish;
     Dream.get "/authenticate/:user" authenticate;
     Dream.post "/authenticate_finish" authenticate_finish;
