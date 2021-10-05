@@ -3,7 +3,6 @@ type key_handle = string
 type error = [
   | `Json_decoding of string * string * string
   | `Base64_decoding of string * string * string
-  | `Challenge_mismatch of string * string
   | `Client_data_type_mismatch of string
   | `Origin_mismatch of string * string
   | `Attestation_object of string
@@ -17,8 +16,6 @@ let pp_error ppf = function
     Fmt.pf ppf "json decoding error in %s: %s (json: %s)" ctx msg json
   | `Base64_decoding (ctx, msg, json) ->
     Fmt.pf ppf "base64 decoding error in %s: %s (json: %s)" ctx msg json
-  | `Challenge_mismatch (should, is) ->
-    Fmt.pf ppf "challenge mismatch: expected %s, received %s" should is
   | `Client_data_type_mismatch is ->
     Fmt.pf ppf "client data type mismatch: received %s" is
   | `Origin_mismatch (should, is) ->
@@ -35,8 +32,6 @@ type t = {
 }
 
 type challenge = string
-
-let reynir = {|{"id":"dpI-yUZhgjMkU3jOmFMkwKx1nDRRruT8W647kk5FY-UO3qmlCsctLqtn7D369ovpj1Ki-0bFcfWY0xJTb0ZV3Q","rawId":"dpI-yUZhgjMkU3jOmFMkwKx1nDRRruT8W647kk5FY-UO3qmlCsctLqtn7D369ovpj1Ki-0bFcfWY0xJTb0ZV3Q","type":"public-key","response":{"attestationObject":"o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YVjEVKwkUFODts743j3E4-Pod_krx_x1yPj5MkxzdU0D1ABBAAAAAAAAAAAAAAAAAAAAAAAAAAAAQHaSPslGYYIzJFN4zphTJMCsdZw0Ua7k_FuuO5JORWPlDt6ppQrHLS6rZ-w9-vaL6Y9SovtGxXH1mNMSU29GVd2lAQIDJiABIVgg9W7_s-sr8SP-S6rTbCAtCSeocIY2SYqAFB-WE2S5OnUiWCBWteq4vgVJYTyplxTWiGZePPPREadDxNuYOn5kZFawVQ","clientDataJSON":"eyJjaGFsbGVuZ2UiOiJPaEhCZldGN2RLcjN0VVBfTmZSUzRnIiwiY2xpZW50RXh0ZW5zaW9ucyI6e30sImhhc2hBbGdvcml0aG0iOiJTSEEtMjU2Iiwib3JpZ2luIjoiaHR0cHM6Ly93ZWJhdXRobi1kZW1vLnJvYnVyLmNvb3AiLCJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIn0"}}|}
 
 let b64_enc = Base64.(encode_string ~pad:false ~alphabet:uri_safe_alphabet)
 
@@ -231,7 +226,7 @@ let rpid t =
   | [ _protocol ; "" ; host ] -> host
   | _ -> assert false
 
-let register_response t challenge data =
+let register_response t data =
   of_json "response" public_key_credential_raw_of_yojson data >>= fun credential ->
   (* XXX: credential.getClientExtensionResults() *)
   let response = credential.response in
@@ -245,10 +240,8 @@ let register_response t challenge data =
   (function
     | "webauthn.create" -> Ok ()
     | wrong_typ -> Error (`Client_data_type_mismatch wrong_typ)) >>= fun () ->
-  json_get "challenge" client_data >>= json_string "challenge" >>= fun challenge' ->
-  b64_dec "response.ClientDataJSON.challenge" challenge' >>= fun challenge' ->
-  guard (String.equal challenge challenge')
-    (`Challenge_mismatch (challenge, challenge')) >>= fun () ->
+  json_get "challenge" client_data >>= json_string "challenge" >>= fun challenge ->
+  b64_dec "response.ClientDataJSON.challenge" challenge >>= fun challenge ->
   json_get "origin" client_data >>= json_string "origin" >>= fun origin ->
   guard (String.equal t.origin origin)
     (`Origin_mismatch (t.origin, origin)) >>= fun () ->
@@ -276,7 +269,7 @@ let register_response t challenge data =
   end >>= fun cert ->
   (* check attestation cert, maybe *)
   (* check auth_data.attested_credential_data.credential_id is not registered ? *)
-  Ok (aaguid, Cstruct.to_string credential_id, pubkey, client_extensions, auth_data.user_present, auth_data.user_verified, auth_data.sign_count, auth_data.extension_data, cert)
+  Ok (challenge, aaguid, Cstruct.to_string credential_id, pubkey, client_extensions, auth_data.user_present, auth_data.user_verified, auth_data.sign_count, auth_data.extension_data, cert)
 
 type auth_response_raw = {
   authenticator_data : base64url_string [@key "authenticatorData"];
@@ -292,7 +285,7 @@ type auth_assertion_raw = {
   response : auth_response_raw;
 } [@@deriving of_yojson]
 
-let authentication_response t cid_keys challenge data =
+let authentication_response t cid_keys data =
   of_json "response" auth_assertion_raw_of_yojson data >>= fun assertion ->
   let response = assertion.response in
   let client_data_hash = Mirage_crypto.Hash.SHA256.digest
@@ -305,10 +298,8 @@ let authentication_response t cid_keys challenge data =
   (function
     | "webauthn.get" -> Ok ()
     | wrong_typ -> Error (`Client_data_type_mismatch wrong_typ)) >>= fun () ->
-  json_get "challenge" client_data >>= json_string "challenge" >>= fun challenge' ->
-  b64_dec "response.ClientDataJSON.challenge" challenge' >>= fun challenge' ->
-  guard (String.equal challenge challenge')
-    (`Challenge_mismatch (challenge, challenge')) >>= fun () ->
+  json_get "challenge" client_data >>= json_string "challenge" >>= fun challenge ->
+  b64_dec "response.ClientDataJSON.challenge" challenge >>= fun challenge ->
   json_get "origin" client_data >>= json_string "origin" >>= fun origin ->
   guard (String.equal t.origin origin)
     (`Origin_mismatch (t.origin, origin)) >>= fun () ->
@@ -324,4 +315,4 @@ let authentication_response t cid_keys challenge data =
   and signature = Cstruct.of_string response.signature
   in
   X509.Public_key.verify `SHA256 ~signature (`P256 pubkey) (`Message sigdata) >>= fun () ->
-  Ok ((assertion.raw_id, pubkey), client_extensions, auth_data.user_present, auth_data.user_verified, auth_data.sign_count, auth_data.extension_data)
+  Ok (challenge, (assertion.raw_id, pubkey), client_extensions, auth_data.user_present, auth_data.user_verified, auth_data.sign_count, auth_data.extension_data)

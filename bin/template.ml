@@ -30,12 +30,12 @@ let overview notes authenticated_as users =
   and users =
     String.concat ""
       ("<h2>Users</h2><ul>" ::
-       Hashtbl.fold (fun name keys acc ->
+       Hashtbl.fold (fun id (name, keys) acc ->
            let credentials = List.map (fun (_, cid, _) ->
                Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet cid)
                keys
            in
-           (Printf.sprintf "<li>%s [<a href=/authenticate/%s>authenticate</a>] (%s)</li>" name name (String.concat ", " credentials)) :: acc)
+           (Printf.sprintf "<li>%s [<a href=/authenticate/%s>authenticate</a>] (%s)</li>" name id (String.concat ", " credentials)) :: acc)
          users [] @ [ "</ul>" ])
   in
   page "" (String.concat "" (notes @ [authenticated_as;links;users]))
@@ -92,7 +92,7 @@ let register_view origin user =
 
             let headers = {'Content-type': "application/json; charset=utf-8"};
 
-            let request = new Request('/register_finish/'+username, { method: 'POST', body: body, headers: headers } );
+            let request = new Request('/register_finish/'+challengeData.user.id, { method: 'POST', body: body, headers: headers } );
             fetch(request)
             .then(function (response) {
               if (!response.ok && response.status != 403) {
@@ -106,6 +106,7 @@ let register_view origin user =
             });
           }).catch(function (err) {
             alert("exception: " + err);
+            window.location = "/";
           });
       });
   }
@@ -177,6 +178,7 @@ let authenticate_view challenge credentials user =
         });
       }).catch(function (err) {
         alert("exception: " + err);
+        window.location = "/";
       });
     |} challenge
        (Yojson.to_string (`List
