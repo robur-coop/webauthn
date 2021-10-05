@@ -8,7 +8,7 @@ let find_username username =
     users None
 
 module KhPubHashtbl = Hashtbl.Make(struct
-    type t = Webauthn.key_handle * Mirage_crypto_ec.P256.Dsa.pub
+    type t = Webauthn.credential_id * Mirage_crypto_ec.P256.Dsa.pub
     let cs_of_pub = Mirage_crypto_ec.P256.Dsa.pub_to_cstruct
     let equal (kh, pub) (kh', pub') =
       String.equal kh kh' && Cstruct.equal (cs_of_pub pub) (cs_of_pub pub')
@@ -27,25 +27,25 @@ let check_counter kh_pub counter =
   then KhPubHashtbl.replace counters kh_pub counter;
   r
 
-let registration_challenges : (string, string * string list) Hashtbl.t = Hashtbl.create 7
+let registration_challenges : (string, string * Webauthn.challenge list) Hashtbl.t = Hashtbl.create 7
 
 let remove_registration_challenge userid challenge =
   match Hashtbl.find_opt registration_challenges userid with
   | None -> ()
   | Some (username, challenges) ->
-    let challenges = List.filter (fun c -> not (String.equal c challenge)) challenges in
+    let challenges = List.filter (fun c -> not (Webauthn.challenge_equal c challenge)) challenges in
     if challenges = [] then
       Hashtbl.remove registration_challenges userid
     else
       Hashtbl.replace registration_challenges userid (username, challenges)
 
-let authentication_challenges : (string, string list) Hashtbl.t = Hashtbl.create 7
+let authentication_challenges : (string, Webauthn.challenge list) Hashtbl.t = Hashtbl.create 7
 
 let remove_authentication_challenge userid challenge =
   match Hashtbl.find_opt authentication_challenges userid with
   | None -> ()
   | Some challenges ->
-    let challenges = List.filter (fun c -> not (String.equal c challenge)) challenges in
+    let challenges = List.filter (fun c -> not (Webauthn.challenge_equal c challenge)) challenges in
     if challenges = [] then
       Hashtbl.remove authentication_challenges userid
     else
@@ -75,7 +75,7 @@ let add_routes t =
 
   let registration_challenge req =
     let user = Dream.param "user" req in
-    let challenge = Cstruct.to_string (Mirage_crypto_rng.generate 16) in
+    let challenge, challenge_b64 = Webauthn.generate_challenge () in
     let userid, credentials = match find_username user with
       | None -> gen_data ~alphabet:Base64.uri_safe_alphabet 8, []
       | Some (userid, (_, credentials)) -> userid, List.map (fun (_, cid, _) -> cid) credentials
@@ -85,7 +85,6 @@ let add_routes t =
       Option.value ~default:[]
     in
     Hashtbl.replace registration_challenges userid (user, challenge :: challenges);
-    let challenge_b64 = (Base64.encode_string challenge) in
     let json = `Assoc [
         "challenge", `String challenge_b64 ;
         "user", `Assoc [
@@ -109,49 +108,55 @@ let add_routes t =
       Logs.warn (fun m -> m "no challenge found");
       Dream.respond ~status:`Bad_Request "Bad request."
     | Some (username, challenges) ->
-      match Webauthn.register_response t body with
+      match Webauthn.register_response_of_string body with
       | Error e ->
         Logs.warn (fun m -> m "error %a" Webauthn.pp_error e);
         let err = to_string e in
         Flash_message.put_flash "" ("Registration failed " ^ err) req;
         Dream.json "false"
-      | Ok (challenge, _aaguid, credential_id, pubkey, _client_extensions, user_present,
-            user_verified, sig_count, _authenticator_extensions, attestation_cert) ->
-        if not (List.mem challenge challenges) then begin
-          Logs.warn (fun m -> m "challenge invalid");
-          Flash_message.put_flash "" "Registration failed: invalid challenge" req;
+      | Ok response ->
+        match Webauthn.register t response with
+        | Error e ->
+          Logs.warn (fun m -> m "error %a" Webauthn.pp_error e);
+          let err = to_string e in
+          Flash_message.put_flash "" ("Registration failed " ^ err) req;
           Dream.json "false"
-        end else begin
-          remove_registration_challenge userid challenge;
-          ignore (check_counter (credential_id, pubkey) sig_count);
-          Logs.info (fun m -> m "user present %B user verified %B" user_present user_verified);
-          Logs.app (fun m -> m "challenge for user %S" username);
-          match Dream.session "authenticated_as" req, Hashtbl.find_opt users userid with
-          | _, None ->
-            Logs.app (fun m -> m "registered %s: %S" username credential_id);
-            Hashtbl.replace users userid (username, [ (pubkey, credential_id, attestation_cert) ]);
-            Dream.invalidate_session req >>= fun () ->
-            Flash_message.put_flash ""
-              (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a>" username userid)
-              req;
-            Dream.json "true"
-          | Some session_user, Some (username', keys) ->
-            Logs.app (fun m -> m "user %S session_user %S" username session_user);
-            if String.equal username session_user && String.equal username username' then begin
+        | Ok (challenge, { user_present ; user_verified ; sign_count ; attested_credential_data ; certificate ; _ }) ->
+          let { Webauthn.credential_id ; public_key ; _ } = attested_credential_data in
+          if not (List.exists (Webauthn.challenge_equal challenge) challenges) then begin
+            Logs.warn (fun m -> m "challenge invalid");
+            Flash_message.put_flash "" "Registration failed: invalid challenge" req;
+            Dream.json "false"
+          end else begin
+            remove_registration_challenge userid challenge;
+            ignore (check_counter (credential_id, public_key) sign_count);
+            Logs.info (fun m -> m "register %S user present %B user verified %B"
+              username user_present user_verified);
+            match Dream.session "authenticated_as" req, Hashtbl.find_opt users userid with
+            | _, None ->
               Logs.app (fun m -> m "registered %s: %S" username credential_id);
-              Hashtbl.replace users userid (username, ((pubkey, credential_id, attestation_cert) :: keys)) ;
+              Hashtbl.replace users userid (username, [ (public_key, credential_id, certificate) ]);
               Dream.invalidate_session req >>= fun () ->
               Flash_message.put_flash ""
                 (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a>" username userid)
                 req;
               Dream.json "true"
-            end else
-              (Logs.info (fun m -> m "session_user %s, user %s (user in users table %s)" session_user username username');
-               Dream.json ~status:`Forbidden "false")
-          | None, Some _keys ->
-            Logs.app (fun m -> m "no session user");
-            Dream.json ~status:`Forbidden "false"
-    end
+            | Some session_user, Some (username', keys) ->
+              if String.equal username session_user && String.equal username username' then begin
+                Logs.app (fun m -> m "registered %s: %S" username credential_id);
+                Hashtbl.replace users userid (username, ((public_key, credential_id, certificate) :: keys)) ;
+                Dream.invalidate_session req >>= fun () ->
+                Flash_message.put_flash ""
+                  (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a>" username userid)
+                  req;
+                Dream.json "true"
+              end else
+                (Logs.info (fun m -> m "session_user %s, user %s (user in users table %s)" session_user username username');
+                 Dream.json ~status:`Forbidden "false")
+            | None, Some _keys ->
+              Logs.app (fun m -> m "no session user");
+              Dream.json ~status:`Forbidden "false"
+      end
   in
 
   let authenticate req =
@@ -162,51 +167,69 @@ let add_routes t =
       Dream.respond ~status:`Bad_Request "Bad request."
     | Some (username, keys) ->
       let credentials = List.map (fun (_, c, _) -> Base64.encode_string c) keys in
-      let challenge = Cstruct.to_string (Mirage_crypto_rng.generate 16) in
+      let challenge, challenge_b64 = Webauthn.generate_challenge () in
       let challenges = Option.value ~default:[] (Hashtbl.find_opt authentication_challenges userid) in
       Hashtbl.replace authentication_challenges userid (challenge :: challenges);
-      Dream.html (Template.authenticate_view (Base64.encode_string challenge) credentials username)
+      Dream.html (Template.authenticate_view challenge_b64 credentials username)
   in
 
   let authenticate_finish req =
-    let userid = Dream.param "userid" req in
-    Dream.body req >>= fun body ->
-    Logs.debug (fun m -> m "received body: %s" body);
-    match Hashtbl.find_opt authentication_challenges userid with
-    | None -> Dream.respond ~status:`Internal_Server_Error "Internal server error."
-    | Some challenges ->
-      match Hashtbl.find_opt users userid with
-      | None ->
+    let userid = Dream.param "userid" req
+    and b64_credential_id = Dream.param "credential_id" req
+    in
+    match Base64.decode ~alphabet:Base64.uri_safe_alphabet ~pad:false b64_credential_id with
+    | Error `Msg err ->
+      Logs.err (fun m -> m "credential id (%S) is not base64 uri safe: %s" b64_credential_id err);
+      Dream.json ~status:`Bad_Request "credential ID decoding error"
+    | Ok credential_id ->
+      Dream.body req >>= fun body ->
+      Logs.debug (fun m -> m "received body: %s" body);
+      match Hashtbl.find_opt authentication_challenges userid, Hashtbl.find_opt users userid with
+      | None, _ -> Dream.respond ~status:`Internal_Server_Error "Internal server error."
+      | _, None ->
         Logs.warn (fun m -> m "no user found with id %s" userid);
         Dream.respond ~status:`Bad_Request "Bad request."
-      | Some (username, keys) ->
-        let cid_keys = List.map (fun (key, credential_id, _) -> credential_id, key) keys in
-        match Webauthn.authentication_response t cid_keys body with
-        | Ok (challenge, credential, _client_extensions, _user_present, _user_verified, counter, _authenticator_extensions) ->
-          if not (List.mem challenge challenges) then begin
-            Logs.warn (fun m -> m "invalid challenge");
-            Flash_message.put_flash "" "Authentication failure: invalid challenge" req;
+      | Some challenges, Some (username, keys) ->
+        match List.find_opt (fun (_, cid, _) -> String.equal cid credential_id) keys with
+        | None ->
+          Logs.warn (fun m -> m "no key found with credential id %s" b64_credential_id);
+          Dream.respond ~status:`Bad_Request "Bad request."
+        | Some (pubkey, _, _) ->
+          match Webauthn.authenticate_response_of_string body with
+          | Error e ->
+            Logs.warn (fun m -> m "error %a" Webauthn.pp_error e);
+            let err = to_string e in
+            Flash_message.put_flash "" ("Authentication failure: " ^ err) req;
             Dream.json "false"
-          end else begin
-            remove_authentication_challenge userid challenge;
-            if check_counter credential counter
-            then begin
-              Flash_message.put_flash ""  "Successfully authenticated" req;
-              Dream.put_session "authenticated_as" username req >>= fun () ->
-              Dream.json "true"
-            end else begin
-              Logs.warn (fun m -> m "credential %S for user %S: counter not strictly increasing! \
-                Got %ld, expected >%ld. webauthn device compromised?"
-                (fst credential) username counter (KhPubHashtbl.find counters credential));
-              Flash_message.put_flash "" "Authentication failure: key compromised?" req;
+          | Ok authenticate_response ->
+            match Webauthn.authenticate t pubkey authenticate_response with
+            | Ok (challenge, { user_present ; user_verified ; sign_count ; _ }) ->
+              Logs.info (fun m -> m "authenticate %S user present %B user verified %B"
+                username user_present user_verified);
+              if not (List.exists (Webauthn.challenge_equal challenge) challenges) then begin
+                Logs.warn (fun m -> m "invalid challenge");
+                Flash_message.put_flash "" "Authentication failure: invalid challenge" req;
+                Dream.json "false"
+              end else begin
+                remove_authentication_challenge userid challenge;
+                if check_counter (credential_id, pubkey) sign_count
+                then begin
+                  Flash_message.put_flash ""  "Successfully authenticated" req;
+                  Dream.put_session "authenticated_as" username req >>= fun () ->
+                  Dream.json "true"
+                end else begin
+                  Logs.warn (fun m -> m "credential %S for user %S: counter not strictly increasing! \
+                    Got %ld, expected >%ld. webauthn device compromised?"
+                    b64_credential_id username sign_count (KhPubHashtbl.find counters (credential_id, pubkey)));
+                  Flash_message.put_flash "" "Authentication failure: key compromised?" req;
+                  Dream.json "false"
+                end
+              end
+            | Error e ->
+              Logs.warn (fun m -> m "error %a" Webauthn.pp_error e);
+              let err = to_string e in
+              Flash_message.put_flash "" ("Authentication failure: " ^ err) req;
               Dream.json "false"
-            end
-          end
-        | Error e ->
-          Logs.warn (fun m -> m "error %a" Webauthn.pp_error e);
-          let err = to_string e in
-          Flash_message.put_flash "" ("Authentication failure: " ^ err) req;
-          Dream.json "false"
   in
 
   let logout req =
@@ -225,7 +248,7 @@ let add_routes t =
     Dream.get "/registration-challenge/:user" registration_challenge;
     Dream.post "/register_finish/:userid" register_finish;
     Dream.get "/authenticate/:userid" authenticate;
-    Dream.post "/authenticate_finish/:userid" authenticate_finish;
+    Dream.post "/authenticate_finish/:credential_id/:userid" authenticate_finish;
     Dream.post "/logout" logout;
     Dream.get "/static/base64.js" base64;
   ]

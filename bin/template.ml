@@ -77,17 +77,11 @@ let register_view origin user =
             let response = credential.response;
             let attestationObject = new Uint8Array(response.attestationObject);
             let clientDataJSON = new Uint8Array(response.clientDataJSON);
-            let rawId = new Uint8Array(credential.rawId);
 
             let body =
               JSON.stringify({
-                id: credential.id,
-                rawId: bufferEncode(rawId),
-                type: credential.type,
-                response: {
-                  attestationObject: bufferEncode(attestationObject),
-                  clientDataJSON: bufferEncode(clientDataJSON),
-                },
+                attestationObject: bufferEncode(attestationObject),
+                clientDataJSON: bufferEncode(clientDataJSON),
               });
 
             let headers = {'Content-type': "application/json; charset=utf-8"};
@@ -142,7 +136,6 @@ let authenticate_view challenge credentials user =
     navigator.credentials.get({ publicKey: request_options })
       .then(function (assertion) {
         let response = assertion.response;
-        let rawId = new Uint8Array(assertion.rawId);
         let authenticatorData = new Uint8Array(assertion.response.authenticatorData);
         let clientDataJSON = new Uint8Array(assertion.response.clientDataJSON);
         let signature = new Uint8Array(assertion.response.signature);
@@ -150,20 +143,15 @@ let authenticate_view challenge credentials user =
  
         let body =
           JSON.stringify({
-            id: assertion.id,
-            rawId: bufferEncode(rawId),
-            type: assertion.type,
-            response: {
-              authenticatorData: bufferEncode(authenticatorData),
-              clientDataJSON: bufferEncode(clientDataJSON),
-              signature: bufferEncode(signature),
-              userHandle: userHandle ? bufferEncode(userHandle) : null,
-            }
+            authenticatorData: bufferEncode(authenticatorData),
+            clientDataJSON: bufferEncode(clientDataJSON),
+            signature: bufferEncode(signature),
+            userHandle: userHandle ? bufferEncode(userHandle) : null,
            });
 
         let headers = {'Content-type': "application/json; charset=utf-8"};
         let username = window.location.pathname.substring("/authenticate/".length);
-        let request = new Request('/authenticate_finish/'+username, { method: 'POST', body: body, headers: headers } );
+        let request = new Request('/authenticate_finish/'+assertion.id+'/'+username, { method: 'POST', body: body, headers: headers } );
         fetch(request)
         .then(function (response) {
           if (!response.ok) {

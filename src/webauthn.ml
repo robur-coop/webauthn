@@ -1,12 +1,13 @@
-type key_handle = string
+type credential_id = string
 
+type json_decoding_error = [  `Json_decoding of string * string * string ]
 type error = [
-  | `Json_decoding of string * string * string
+  json_decoding_error
   | `Base64_decoding of string * string * string
   | `Client_data_type_mismatch of string
   | `Origin_mismatch of string * string
   | `Attestation_object of string
-  | `Rpid_hash_mismatch of Cstruct.t * Cstruct.t
+  | `Rpid_hash_mismatch of string * string
   | `Missing_credential_data
   | `Msg of string
 ]
@@ -23,7 +24,8 @@ let pp_error ppf = function
   | `Attestation_object msg ->
     Fmt.pf ppf "attestation object error %s" msg
   | `Rpid_hash_mismatch (should, is) ->
-    Fmt.pf ppf "rpid hash mismatch: expected %a received %a" Cstruct.hexdump_pp should Cstruct.hexdump_pp is
+    Fmt.pf ppf "rpid hash mismatch: expected %s received %s"
+      (Base64.encode_string should) (Base64.encode_string is)
   | `Missing_credential_data -> Fmt.string ppf "missing credential data"
   | `Msg msg -> Fmt.pf ppf "error %s" msg
 
@@ -33,12 +35,18 @@ type t = {
 
 type challenge = string
 
-let b64_enc = Base64.(encode_string ~pad:false ~alphabet:uri_safe_alphabet)
+let generate_challenge ?(size = 32) () =
+  if size < 16 then invalid_arg "size must be at least 16 bytes";
+  let ch = Mirage_crypto_rng.generate size |> Cstruct.to_string in
+  ch, Base64.encode_string ch
 
-let lift_err f = function Ok _ as a -> a | Error x -> Error (f x)
+let challenge_to_string c = c
+let challenge_of_string s = Some s
+
+let challenge_equal = String.equal
 
 let b64_dec thing s =
-  lift_err
+  Result.map_error
     (function `Msg m -> `Base64_decoding (thing, m, s))
     Base64.(decode ~pad:false ~alphabet:uri_safe_alphabet s)
 
@@ -52,16 +60,6 @@ let base64url_string_of_yojson = function
     Base64.(decode ~pad:false ~alphabet:uri_safe_alphabet b64)
     |> Result.map_error (function `Msg m -> m)
   | _ -> Error "base64url_string"
-let base64url_string_to_yojson s =
-  `String Base64.(encode_string ~pad:false ~alphabet:uri_safe_alphabet s)
-
-type typ = Public_key
-
-let typ_of_yojson = function
-  | `String "public-key" -> Ok Public_key
-  | _ -> Error "typ"
-
-let typ_to_yojson Public_key = `String "public-key"
 
 let extract_k_i map k : (_, string) result =
   Option.to_result ~none:"key not present"
@@ -120,10 +118,19 @@ let parse_attested_credential_data data =
   cose_pubkey pubkey >>= fun pubkey ->
   Ok ((aaguid, cid, pubkey), Cstruct.of_string rest)
 
+let string_keys kv =
+  List.fold_right (fun (k, v) acc ->
+    match acc, k with
+    | Error _ as e, _ -> e
+    | Ok xs, `Text t -> Ok ((t, v) :: xs)
+    | _, _ -> Error "Map does contain non-text keys")
+    kv (Ok [])
+
 let parse_extension_data data =
    (try Ok (CBOR.Simple.decode_partial (Cstruct.to_string data))
    with CBOR.Error m -> Error m) >>= fun (data, rest) ->
    extract_map data >>= fun kv ->
+   string_keys kv >>= fun kv ->
    Ok (kv, Cstruct.of_string rest)
   
 type auth_data = {
@@ -132,7 +139,7 @@ type auth_data = {
   user_verified : bool ;
   sign_count : Int32.t ;
   attested_credential_data : (Cstruct.t * Cstruct.t * Mirage_crypto_ec.P256.Dsa.pub) option ;
-  extension_data : (CBOR.Simple.t * CBOR.Simple.t) list option ;
+  extension_data : (string * CBOR.Simple.t) list option ;
 }
 
 let flags byte =
@@ -185,20 +192,8 @@ let parse_attestation_object data =
   | _ -> Error "bad attestationObject CBOR"
   | exception CBOR.Error m -> Error m
 
-type response_raw = {
-  attestation_object : base64url_string [@key "attestationObject"];
-  client_data_json : base64url_string [@key "clientDataJSON"];
-} [@@deriving of_yojson]
-
-type public_key_credential_raw = {
-  id : string;
-  raw_id : base64url_string [@key "rawId"];
-  typ : typ [@key "type"];
-  response : response_raw;
-} [@@deriving of_yojson]
-
 let of_json_or_err thing p json =
-  lift_err
+  Result.map_error
     (fun msg -> `Json_decoding (thing, msg, Yojson.Safe.to_string json))
     (p json)
 
@@ -218,6 +213,10 @@ let json_string thing : Yojson.Safe.t -> (string, _) result = function
   | `String s -> Ok s
   | json -> Error (`Json_decoding (thing, "non-string", Yojson.Safe.to_string json))
 
+let json_assoc thing : Yojson.Safe.t -> ((string * Yojson.Safe.t) list, _) result = function
+  | `Assoc s -> Ok s
+  | json -> Error (`Json_decoding (thing, "non-string", Yojson.Safe.to_string json))
+
 (* XXX: verify [origin] is in fact an origin *)
 let create origin = { origin }
 
@@ -226,10 +225,32 @@ let rpid t =
   | [ _protocol ; "" ; host ] -> host
   | _ -> assert false
 
-let register_response t data =
-  of_json "response" public_key_credential_raw_of_yojson data >>= fun credential ->
+type credential_data = {
+  aaguid : string ;
+  credential_id : credential_id ;
+  public_key : Mirage_crypto_ec.P256.Dsa.pub ;
+}
+
+type registration = {
+  user_present : bool ;
+  user_verified : bool ;
+  sign_count : Int32.t ;
+  attested_credential_data : credential_data ;
+  authenticator_extensions : (string * CBOR.Simple.t) list option ;
+  client_extensions : (string * Yojson.Safe.t) list ;
+  certificate : X509.Certificate.t option ;
+}
+
+type register_response = {
+  attestation_object : base64url_string [@key "attestationObject"];
+  client_data_json : base64url_string [@key "clientDataJSON"];
+} [@@deriving of_yojson]
+
+let register_response_of_string =
+  of_json "register response" register_response_of_yojson
+
+let register t response =
   (* XXX: credential.getClientExtensionResults() *)
-  let response = credential.response in
   let client_data_hash = Mirage_crypto.Hash.SHA256.digest
     (Cstruct.of_string response.client_data_json) in
   begin try Ok (Yojson.Safe.from_string response.client_data_json)
@@ -245,19 +266,19 @@ let register_response t data =
   json_get "origin" client_data >>= json_string "origin" >>= fun origin ->
   guard (String.equal t.origin origin)
     (`Origin_mismatch (t.origin, origin)) >>= fun () ->
-  json_get "clientExtensions" client_data >>= fun client_extensions ->
+  json_get "clientExtensions" client_data >>= json_assoc "clientExtensions" >>= fun client_extensions ->
   Result.map_error (fun m -> `Attestation_object m)
     (parse_attestation_object response.attestation_object) >>= fun (auth_data, attestation_statement) ->
   let rpid_hash = Mirage_crypto.Hash.SHA256.digest (Cstruct.of_string (rpid t)) in
   guard (Cstruct.equal auth_data.rpid_hash rpid_hash)
-    (`Rpid_hash_mismatch (rpid_hash, auth_data.rpid_hash)) >>= fun () ->
+    (`Rpid_hash_mismatch (Cstruct.to_string rpid_hash, Cstruct.to_string auth_data.rpid_hash)) >>= fun () ->
   (* verify user present, user verified flags in auth_data.flags *)
   Option.to_result ~none:`Missing_credential_data
-    auth_data.attested_credential_data >>= fun (aaguid, credential_id, pubkey) ->
+    auth_data.attested_credential_data >>= fun (aaguid, credential_id, public_key) ->
   begin match attestation_statement with
    | None -> Ok None
    | Some (cert, signature) ->
-     let pub_cs = Mirage_crypto_ec.P256.Dsa.pub_to_cstruct pubkey in
+     let pub_cs = Mirage_crypto_ec.P256.Dsa.pub_to_cstruct public_key in
      let sigdata = Cstruct.concat [
        Cstruct.create 1 ; rpid_hash ; client_data_hash ; credential_id ; pub_cs
      ] in
@@ -266,28 +287,46 @@ let register_response t data =
      in
      X509.Public_key.verify `SHA256 ~signature pk (`Message sigdata) >>= fun () ->
      Ok (Some cert)
-  end >>= fun cert ->
+  end >>= fun certificate ->
   (* check attestation cert, maybe *)
   (* check auth_data.attested_credential_data.credential_id is not registered ? *)
-  Ok (challenge, aaguid, Cstruct.to_string credential_id, pubkey, client_extensions, auth_data.user_present, auth_data.user_verified, auth_data.sign_count, auth_data.extension_data, cert)
+  let registration =
+    let attested_credential_data = {
+      aaguid = Cstruct.to_string aaguid ;
+      credential_id = Cstruct.to_string credential_id ;
+      public_key
+    } in
+    {
+      user_present = auth_data.user_present ;
+      user_verified = auth_data.user_verified ;
+      sign_count = auth_data.sign_count ;
+      attested_credential_data ;
+      authenticator_extensions = auth_data.extension_data ;
+      client_extensions ;
+      certificate ;
+    }
+  in
+  Ok (challenge, registration)
 
-type auth_response_raw = {
+type authentication = {
+  user_present : bool ;
+  user_verified : bool ;
+  sign_count : Int32.t ;
+  authenticator_extensions : (string * CBOR.Simple.t) list option ;
+  client_extensions : (string * Yojson.Safe.t) list ;
+}
+
+type authenticate_response = {
   authenticator_data : base64url_string [@key "authenticatorData"];
   client_data_json : base64url_string [@key "clientDataJSON"];
   signature : base64url_string ;
   userHandle : base64url_string option ;
 } [@@deriving of_yojson]
 
-type auth_assertion_raw = {
-  id : string;
-  raw_id : base64url_string [@key "rawId"];
-  typ : typ [@key "type"];
-  response : auth_response_raw;
-} [@@deriving of_yojson]
+let authenticate_response_of_string =
+  of_json "authenticate response" authenticate_response_of_yojson
 
-let authentication_response t cid_keys data =
-  of_json "response" auth_assertion_raw_of_yojson data >>= fun assertion ->
-  let response = assertion.response in
+let authenticate t public_key response =
   let client_data_hash = Mirage_crypto.Hash.SHA256.digest
     (Cstruct.of_string response.client_data_json) in
   begin try Ok (Yojson.Safe.from_string response.client_data_json)
@@ -303,16 +342,21 @@ let authentication_response t cid_keys data =
   json_get "origin" client_data >>= json_string "origin" >>= fun origin ->
   guard (String.equal t.origin origin)
     (`Origin_mismatch (t.origin, origin)) >>= fun () ->
-  json_get "clientExtensions" client_data >>= fun client_extensions ->
+  json_get "clientExtensions" client_data >>= json_assoc "clientExtensions" >>= fun client_extensions ->
   Result.map_error (fun m -> `Msg m)
     (parse_auth_data response.authenticator_data) >>= fun auth_data ->
   let rpid_hash = Mirage_crypto.Hash.SHA256.digest (Cstruct.of_string (rpid t)) in
   guard (Cstruct.equal auth_data.rpid_hash rpid_hash)
-    (`Rpid_hash_mismatch (rpid_hash, auth_data.rpid_hash)) >>= fun () ->
-  Option.to_result ~none:(`Msg "no key found")
-    (List.assoc_opt assertion.raw_id cid_keys) >>= fun pubkey ->
+    (`Rpid_hash_mismatch (Cstruct.to_string rpid_hash, Cstruct.to_string auth_data.rpid_hash)) >>= fun () ->
   let sigdata = Cstruct.concat [ Cstruct.of_string response.authenticator_data ; client_data_hash ]
   and signature = Cstruct.of_string response.signature
   in
-  X509.Public_key.verify `SHA256 ~signature (`P256 pubkey) (`Message sigdata) >>= fun () ->
-  Ok (challenge, (assertion.raw_id, pubkey), client_extensions, auth_data.user_present, auth_data.user_verified, auth_data.sign_count, auth_data.extension_data)
+  X509.Public_key.verify `SHA256 ~signature (`P256 public_key) (`Message sigdata) >>= fun () ->
+  let authentication = {
+    user_present = auth_data.user_present ;
+    user_verified = auth_data.user_verified ;
+    sign_count = auth_data.sign_count ;
+    authenticator_extensions = auth_data.extension_data ;
+    client_extensions ;
+  } in
+  Ok (challenge, authentication)
