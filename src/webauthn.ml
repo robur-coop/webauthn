@@ -297,7 +297,7 @@ type registration = {
   sign_count : Int32.t ;
   attested_credential_data : credential_data ;
   authenticator_extensions : (string * CBOR.Simple.t) list option ;
-  client_extensions : (string * Yojson.Safe.t) list ;
+  client_extensions : (string * Yojson.Safe.t) list option ;
   certificate : X509.Certificate.t option ;
 }
 
@@ -326,7 +326,14 @@ let register t response =
   json_get "origin" client_data >>= json_string "origin" >>= fun origin ->
   guard (String.equal t.origin origin)
     (`Origin_mismatch (t.origin, origin)) >>= fun () ->
-  json_get "clientExtensions" client_data >>= json_assoc "clientExtensions" >>= fun client_extensions ->
+  let client_extensions = Result.to_option (json_get "clientExtensions" client_data) in
+  begin match client_extensions with
+    | Some client_extensions ->
+      json_assoc "clientExtensions" client_extensions >>= fun client_extensions ->
+      Ok (Some client_extensions)
+    | None ->
+      Ok None
+  end >>= fun client_extensions ->
   parse_attestation_object response.attestation_object >>= fun (auth_data, attestation_statement) ->
   let rpid_hash = Mirage_crypto.Hash.SHA256.digest (Cstruct.of_string (rpid t)) in
   guard (Cstruct.equal auth_data.rpid_hash rpid_hash)
@@ -373,7 +380,7 @@ type authentication = {
   user_verified : bool ;
   sign_count : Int32.t ;
   authenticator_extensions : (string * CBOR.Simple.t) list option ;
-  client_extensions : (string * Yojson.Safe.t) list ;
+  client_extensions : (string * Yojson.Safe.t) list option ;
 }
 
 type authenticate_response = {
@@ -402,7 +409,14 @@ let authenticate t public_key response =
   json_get "origin" client_data >>= json_string "origin" >>= fun origin ->
   guard (String.equal t.origin origin)
     (`Origin_mismatch (t.origin, origin)) >>= fun () ->
-  json_get "clientExtensions" client_data >>= json_assoc "clientExtensions" >>= fun client_extensions ->
+  let client_extensions = Result.to_option (json_get "clientExtensions" client_data) in
+  begin match client_extensions with
+    | Some client_extensions ->
+      json_assoc "clientExtensions" client_extensions >>= fun client_extensions ->
+      Ok (Some client_extensions)
+    | None ->
+      Ok None
+  end >>= fun client_extensions ->
   parse_auth_data response.authenticator_data >>= fun auth_data ->
   let rpid_hash = Mirage_crypto.Hash.SHA256.digest (Cstruct.of_string (rpid t)) in
   guard (Cstruct.equal auth_data.rpid_hash rpid_hash)

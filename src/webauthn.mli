@@ -105,7 +105,7 @@ type registration = {
   sign_count : Int32.t ;
   attested_credential_data : credential_data ;
   authenticator_extensions : (string * CBOR.Simple.t) list option ;
-  client_extensions : (string * Yojson.Safe.t) list ;
+  client_extensions : (string * Yojson.Safe.t) list option ;
   certificate : X509.Certificate.t option ;
 }
 
@@ -134,7 +134,7 @@ type authentication = {
   user_verified : bool ;
   sign_count : Int32.t ;
   authenticator_extensions : (string * CBOR.Simple.t) list option ;
-  client_extensions : (string * Yojson.Safe.t) list ;
+  client_extensions : (string * Yojson.Safe.t) list option ;
 }
 
 (** The type for an authentication response. *)
