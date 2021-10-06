@@ -6,15 +6,27 @@ val rpid : t -> string
 
 type json_decoding_error = [ `Json_decoding of string * string * string ]
 
-type error = [ 
-    json_decoding_error
+type decoding_error = [
+  json_decoding_error
   | `Base64_decoding of string * string * string
+  | `CBOR_decoding of string * string * string
+  | `Unexpected_CBOR of string * string * CBOR.Simple.t
+  | `Binary_decoding of string * string * Cstruct.t
+  | `Attestation_object_decoding of string * string * string
+]
+
+type error = [
+  decoding_error
+  | `Unsupported_key_type of int
+  | `Unsupported_algorithm of int
+  | `Unsupported_elliptic_curve of int
+  | `Unsupported_attestation_format of string
+  | `Invalid_public_key of string
   | `Client_data_type_mismatch of string
   | `Origin_mismatch of string * string
-  | `Attestation_object of string
   | `Rpid_hash_mismatch of string * string
   | `Missing_credential_data
-  | `Msg of string
+  | `Signature_verification of string
 ]
 
 val pp_error : Format.formatter -> [< error ] -> unit
