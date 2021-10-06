@@ -1,6 +1,6 @@
 type t
 
-val create : string -> t
+val create : string -> (t, string) result
 
 val rpid : t -> string
 

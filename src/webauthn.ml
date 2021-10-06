@@ -60,6 +60,7 @@ let pp_error ppf = function
 
 type t = {
   origin : string;
+  rpid : [`host] Domain_name.t;
 }
 
 type challenge = string
@@ -256,13 +257,33 @@ let json_assoc thing : Yojson.Safe.t -> ((string * Yojson.Safe.t) list, _) resul
   | `Assoc s -> Ok s
   | json -> Error (`Json_decoding (thing, "non-assoc", Yojson.Safe.to_string json))
 
-(* XXX: verify [origin] is in fact an origin *)
-let create origin = { origin }
+let create origin =
+  match String.split_on_char '/' origin with
+  | [ "https:" ; "" ; host_port ] ->
+    let host_ok h =
+      match Domain_name.of_string h with
+      | Error (`Msg m) -> Error ("origin is not a domain name " ^ m ^ "(data: " ^ h ^ ")")
+      | Ok d -> match Domain_name.host d with
+        | Error (`Msg m) ->  Error ("origin is not a host name " ^ m ^ "(data: " ^ h ^ ")")
+        | Ok host -> Ok host
+    in
+    begin
+      match
+        match String.split_on_char ':' host_port with
+        | [ host ] -> host_ok host
+        | [ host ; port ] ->
+          (match host_ok host with
+           | Error _ as e -> e
+           | Ok h -> (try ignore(int_of_string port); Ok h
+                      with Failure _ -> Error ("invalid port " ^ port)))
+        | _ -> Error ("invalid origin host and port " ^ host_port)
+      with
+      | Ok host -> Ok { origin ; rpid = host }
+      | Error _ as e -> e
+    end
+  | _ ->  Error ("invalid origin " ^ origin)
 
-let rpid t =
-  match String.split_on_char '/' t.origin with
-  | [ _protocol ; "" ; host ] -> host
-  | _ -> assert false
+let rpid t = Domain_name.to_string t.rpid
 
 type credential_data = {
   aaguid : string ;

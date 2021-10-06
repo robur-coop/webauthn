@@ -255,15 +255,17 @@ let add_routes t =
 
 
 let setup_app level port host origin https =
-  let webauthn = Webauthn.create origin in
   let level = match level with None -> None | Some Logs.Debug -> Some `Debug | Some Info -> Some `Info | Some Warning -> Some `Warning | Some Error -> Some `Error | Some App -> None in
   Dream.initialize_log ?level ();
-  Dream.run ~port ~interface:host ~https
-  @@ Dream.logger
-  @@ Dream.memory_sessions
-  @@ Flash_message.flash_messages
-  @@ add_routes webauthn
-  @@ Dream.not_found
+  match Webauthn.create origin with
+  | Error e -> Logs.err (fun m -> m "failed to create webauthn: %s" e); exit 1
+  | Ok webauthn ->
+    Dream.run ~port ~interface:host ~https
+    @@ Dream.logger
+    @@ Dream.memory_sessions
+    @@ Flash_message.flash_messages
+    @@ add_routes webauthn
+    @@ Dream.not_found
 
 open Cmdliner
 
