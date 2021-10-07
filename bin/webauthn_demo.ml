@@ -137,8 +137,13 @@ let add_routes t =
               Logs.app (fun m -> m "registered %s: %S" username credential_id);
               Hashtbl.replace users userid (username, [ (public_key, credential_id, certificate) ]);
               Dream.invalidate_session req >>= fun () ->
+              let cert_string =
+                Option.fold ~none:"No certificate"
+                  ~some:(fun c -> X509.Certificate.encode_pem c |> Cstruct.to_string)
+                  certificate
+              in
               Flash_message.put_flash ""
-                (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a>" username userid)
+                (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a><br/>Certificate:<br/><pre>%s</pre>" username userid cert_string)
                 req;
               Dream.json "true"
             | Some session_user, Some (username', keys) ->
@@ -146,8 +151,13 @@ let add_routes t =
                 Logs.app (fun m -> m "registered %s: %S" username credential_id);
                 Hashtbl.replace users userid (username, ((public_key, credential_id, certificate) :: keys)) ;
                 Dream.invalidate_session req >>= fun () ->
+                let cert_string =
+                  Option.fold ~none:"No certificate"
+                    ~some:(fun c -> X509.Certificate.encode_pem c |> Cstruct.to_string)
+                    certificate
+                in
                 Flash_message.put_flash ""
-                  (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a>" username userid)
+                  (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a><br/>Certificate:<br/><pre>%s</pre>" username userid cert_string)
                   req;
                 Dream.json "true"
               end else
