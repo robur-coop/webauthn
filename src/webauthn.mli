@@ -155,3 +155,21 @@ val authenticate_response_of_string : string ->
     browser. *)
 val authenticate : t -> Mirage_crypto_ec.P256.Dsa.pub -> authenticate_response ->
   (challenge * authentication, error) result
+
+(** The type of FIDO U2F transports. *)
+type transport = [
+  | `Bluetooth_classic
+  | `Bluetooth_low_energy
+  | `Usb
+  | `Nfc
+  | `Usb_internal
+]
+
+(** [pp_transport ppf tranport] pretty-prints the [transport] on [ppf]. *)
+val pp_transport : Format.formatter -> transport -> unit
+
+(** [transports_of_cert certficate] attempts to extract the FIDO U2F
+    authenticator transports extension (OID 1.3.6.1.4.1.45724.2.1.1) from the
+    [certificate].  *)
+val transports_of_cert : X509.Certificate.t ->
+  (transport list, [`Msg of string]) result

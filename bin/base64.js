@@ -28,10 +28,6 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
   function b64ToByteArray (b64) {
     var i, j, l, tmp, placeHolders, arr
 
-    if (b64.length % 4 > 0) {
-      throw new Error('Invalid string. Length must be a multiple of 4')
-    }
-
     // the number of equal signs (place holders)
     // if there are two placeholders, than the two characters before it
     // represent one byte

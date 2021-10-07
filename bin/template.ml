@@ -11,6 +11,9 @@ let page s b =
                .replace(/\//g, "_")
                .replace(/=/g, "");
       }
+      function bufferDecode(value) {
+        return base64js.toByteArray(value);
+      }
       </script>
       <script>%s</script>
      </head><body>%s</body></html>|} s b
@@ -43,8 +46,8 @@ let overview notes authenticated_as users =
 let register_view origin user =
   let script = Printf.sprintf {|
   function makePublicKey(challengeData, attestation) {
-    let challenge = Uint8Array.from(window.atob(challengeData.challenge), c=>c.charCodeAt(0));
-    let user_id = Uint8Array.from(window.atob(challengeData.user.id), c=>c.charCodeAt(0));
+    let challenge = bufferDecode(challengeData.challenge);
+    let user_id = bufferDecode(challengeData.user.id);
     return {
       challenge: challenge,
       rp: {
@@ -64,7 +67,7 @@ let register_view origin user =
       ],
       attestation: attestation,
       excludeCredentials: challengeData.excludeCredentials.map(id => ({ type: "public-key",
-        id: Uint8Array.from(window.atob(id), c=>c.charCodeAt(0))}))
+        id: bufferDecode(id)}))
     };
   }
   function do_register(username, attestation) {
@@ -120,7 +123,7 @@ let register_view origin user =
           <option value="indirect">indirect</option>
           <option value="none">none</option>
         </select>
-        <button id="button" type="button" onclick="doit()">Register</button>
+        <button id="button" type="button" onmousedown="doit()">Register</button>
       </form>
 |} user
   in
@@ -130,8 +133,8 @@ let authenticate_view challenge credentials user =
   let script =
     Printf.sprintf {|
     let request_options = {
-        challenge: Uint8Array.from(window.atob("%s"), c=>c.charCodeAt(0)),
-        allowCredentials: %s.map(x => { x.id = Uint8Array.from(window.atob(x.id), c=>c.charCodeAt(0)); return x }),
+        challenge: bufferDecode("%s"),
+        allowCredentials: %s.map(x => { x.id = bufferDecode(x.id); return x }),
     };
     navigator.credentials.get({ publicKey: request_options })
       .then(function (assertion) {

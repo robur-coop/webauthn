@@ -132,34 +132,32 @@ let add_routes t =
             ignore (check_counter (credential_id, public_key) sign_count);
             Logs.info (fun m -> m "register %S user present %B user verified %B"
               username user_present user_verified);
-            match Dream.session "authenticated_as" req, Hashtbl.find_opt users userid with
-            | _, None ->
+            let registered other_keys =
               Logs.app (fun m -> m "registered %s: %S" username credential_id);
-              Hashtbl.replace users userid (username, [ (public_key, credential_id, certificate) ]);
+              Hashtbl.replace users userid (username, ((public_key, credential_id, certificate) :: other_keys)) ;
               Dream.invalidate_session req >>= fun () ->
-              let cert_string =
-                Option.fold ~none:"No certificate"
-                  ~some:(fun c -> X509.Certificate.encode_pem c |> Cstruct.to_string)
+              let cert_pem, cert_string, transports =
+                Option.fold ~none:("No certificate", "No certificate", Ok [])
+                  ~some:(fun c ->
+                           X509.Certificate.encode_pem c |> Cstruct.to_string,
+                           Fmt.to_to_string X509.Certificate.pp c,
+                           Webauthn.transports_of_cert c)
                   certificate
               in
+              let transports = match transports with
+                | Error `Msg m -> "error " ^ m
+                | Ok ts -> Fmt.str "%a" Fmt.(list ~sep:(any ", ") Webauthn.pp_transport) ts
+              in
               Flash_message.put_flash ""
-                (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a><br/>Certificate:<br/><pre>%s</pre>" username userid cert_string)
+                (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a><br/>Certificate transports: %s<br/>Certificate: %s<br/>PEM Certificate:<br/><pre>%s</pre>" username userid transports cert_string cert_pem)
                 req;
               Dream.json "true"
+            in
+            match Dream.session "authenticated_as" req, Hashtbl.find_opt users userid with
+            | _, None -> registered []
             | Some session_user, Some (username', keys) ->
               if String.equal username session_user && String.equal username username' then begin
-                Logs.app (fun m -> m "registered %s: %S" username credential_id);
-                Hashtbl.replace users userid (username, ((public_key, credential_id, certificate) :: keys)) ;
-                Dream.invalidate_session req >>= fun () ->
-                let cert_string =
-                  Option.fold ~none:"No certificate"
-                    ~some:(fun c -> X509.Certificate.encode_pem c |> Cstruct.to_string)
-                    certificate
-                in
-                Flash_message.put_flash ""
-                  (Printf.sprintf "Successfully registered as %s! <a href=\"/authenticate/%s\">[authenticate]</a><br/>Certificate:<br/><pre>%s</pre>" username userid cert_string)
-                  req;
-                Dream.json "true"
+                registered keys
               end else
                 (Logs.info (fun m -> m "session_user %s, user %s (user in users table %s)" session_user username username');
                  Dream.json ~status:`Forbidden "false")

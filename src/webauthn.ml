@@ -434,3 +434,47 @@ let authenticate t public_key response =
     client_extensions ;
   } in
   Ok (challenge, authentication)
+
+let fido_u2f_transport_oid =
+  Asn.OID.(base 1 3 <| 6 <| 1 <| 4 <| 1 <| 45724 <| 2 <| 1 <| 1)
+
+type transport = [
+  | `Bluetooth_classic
+  | `Bluetooth_low_energy
+  | `Usb
+  | `Nfc
+  | `Usb_internal
+]
+
+let pp_transport ppf = function
+  | `Bluetooth_classic -> Fmt.string ppf "Bluetooth classic"
+  | `Bluetooth_low_energy -> Fmt.string ppf "Bluetooth low energy"
+  | `Usb -> Fmt.string ppf "USB"
+  | `Nfc -> Fmt.string ppf "NFC"
+  | `Usb_internal -> Fmt.string ppf "USB internal"
+
+let transports =
+  let opts = [
+    (0, `Bluetooth_classic);
+    (1, `Bluetooth_low_energy);
+    (2, `Usb);
+    (3, `Nfc);
+    (4, `Usb_internal);
+  ] in
+  Asn.S.bit_string_flags opts
+
+let decode_strict codec cs =
+  match Asn.decode codec cs with
+  | Ok (a, cs) ->
+    guard (Cstruct.length cs = 0) (`Msg "trailing bytes") >>= fun () ->
+    Ok a
+  | Error (`Parse msg) -> Error (`Msg msg)
+
+let decode_transport =
+  decode_strict (Asn.codec Asn.der transports)
+
+let transports_of_cert c =
+  Result.bind
+    (Option.to_result ~none:(`Msg "extension not present")
+      (X509.Extension.(find (Unsupported fido_u2f_transport_oid) (X509.Certificate.extensions c))))
+    (fun (_, data) -> decode_transport data)
