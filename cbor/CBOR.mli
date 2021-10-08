@@ -2,6 +2,8 @@
 
 exception Error of string
 
+exception Noncanonical of string
+
 module Simple : sig
 
 type t =

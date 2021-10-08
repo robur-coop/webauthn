@@ -1,5 +1,16 @@
 (library
  (name cbor)
  (public_name webauthn.cbor)
+ (modules CBOR)
  (wrapped false)
  (libraries ocplib-endian))
+
+(executable
+  (name test)
+  (modules test)
+  (libraries webauthn.cbor yojson))
+
+(rule
+  (alias runtest)
+  (deps test.exe appendix_a.json)
+  (action (run ./test.exe appendix_a.json)))

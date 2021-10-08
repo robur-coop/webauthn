@@ -6,10 +6,11 @@ module SE = EndianString.BigEndian_unsafe
 
 exception Error of string
 
-let (@@) f x = f x
-let (|>) x f = f x
-let list_iteri f l = let i = ref 0 in List.iter (fun x -> f !i x; incr i) l
+exception Noncanonical of string
+
 let fail fmt = ksprintf (fun s -> raise (Error s)) fmt
+let noncanonical fmt = ksprintf (fun s -> raise (Noncanonical s))
+    ("noncanonical CTAP2 CBOR: " ^^ fmt)
 
 module Encode = struct
 
@@ -115,16 +116,22 @@ module Simple = struct
   let two_min_int32 = 2 * Int32.to_int Int32.min_int
 
   let extract_number byte1 r =
+    let guard_min min n = if n < min
+      then noncanonical "non-compact number encoding: %d < %d" n min
+      else n
+    in
     match get_additional byte1 with
     | n when n < 24 -> n
-    | 24 -> get_byte r
-    | 25 -> get_n r 2 SE.get_uint16
+    | 24 -> guard_min 24 @@ get_byte r
+    | 25 -> guard_min 256 @@ get_n r 2 SE.get_uint16
     | 26 ->
-      let n = Int32.to_int @@ get_n r 4 SE.get_int32 in
+      let n = guard_min (256*256) @@ Int32.to_int @@ get_n r 4 SE.get_int32 in
       if n < 0 then n - two_min_int32 else n
     | 27 ->
       let n = get_n r 8 SE.get_int64 in
       if n > int64_max_int || n < 0L then fail "extract_number: %Lu" n;
+      if Int64.compare n 0x1_0000_0000L < 0
+      then noncanonical "non-compact number encoding: %Ld < %Ld" n 0x1_0000_0000L;
       Int64.to_int n
     | n -> fail "bad additional %d" n
 
@@ -140,23 +147,57 @@ module Simple = struct
     in
     if half land 0x8000 = 0 then value else ~-. value
 
+  let monotonic s s' =
+    let major_typ s = int_of_char s.[0] lsr 5 in
+    let get_number s = match get_additional (int_of_char s.[0]) with
+      | n when n < 24 -> 1, Int64.of_int n
+      | 24 -> 2, Int64.of_int (int_of_char s.[1])
+      | 25 -> 3, Int64.of_int (SE.get_uint16 s 1)
+      | 26 -> 5, Int64.logand 0xFFFFFFFFL (Int64.of_int32 (SE.get_int32 s 1))
+      | 27 -> 9, SE.get_int64 s 1
+      | _ -> assert false
+    in
+    major_typ s < major_typ s' ||
+    major_typ s = major_typ s' &&
+    let off, n = get_number s and _, n' = get_number s' in
+    Int64.unsigned_compare n n' < 0 ||
+    Int64.unsigned_compare n n' = 0 &&
+    begin
+      List.mem (major_typ s) [2; 3; 4; 5; 7 (* XXX: unsure about 7 *)] &&
+      let len = Int64.to_int n in
+      String.sub s off len < String.sub s' off len
+    end
+
   exception Break
 
   let extract_list byte1 r f =
     if is_indefinite byte1 then
-      let l = ref [] in
-      try while true do l := f r :: !l done; assert false with Break -> List.rev !l
+      noncanonical "indefinite length array or map"
     else
       let n = extract_number byte1 r in Array.to_list @@ Array.init n (fun _ -> f r)
 
-  let rec extract_pair r =
+  let rec extract_pair ((s, i) as r) =
+    let start = !i in
     let a = extract r in
+    let finish = !i in
+    let raw = String.sub s start (finish - start) in
     let b = try extract r with Break -> fail "extract_pair: unexpected break" in
-    a,b
-  and extract_string byte1 r f =
+    raw, (a,b)
+  and extract_map byte1 r =
+    let kvs = extract_list byte1 r extract_pair in
+    let _, kvs =
+      List.fold_right (fun (curr, kv) (next, acc) ->
+          match next with
+          | None -> (Some curr, kv :: acc)
+          | Some next ->
+            if not (monotonic curr next) then noncanonical "unsorted map";
+            (Some curr, kv :: acc))
+        kvs (None, [])
+    in
+    kvs
+  and extract_string byte1 r =
     if is_indefinite byte1 then
-      let b = Buffer.create 10 in
-      try while true do Buffer.add_string b (f @@ extract r) done; assert false with Break -> Buffer.contents b
+      noncanonical "indefinite length string"
     else
       let n = extract_number byte1 r in get_s r n
   and extract r =
@@ -164,11 +205,11 @@ module Simple = struct
     match byte1 lsr 5 with
     | 0 -> `Int (extract_number byte1 r)
     | 1 -> `Int (-1 - extract_number byte1 r)
-    | 2 -> `Bytes (extract_string byte1 r (function `Bytes s -> s | _ -> fail "extract: not a bytes chunk"))
-    | 3 -> `Text (extract_string byte1 r (function `Text s -> s | _ -> fail "extract: not a text chunk"))
+    | 2 -> `Bytes (extract_string byte1 r)
+    | 3 -> `Text (extract_string byte1 r)
     | 4 -> `Array (extract_list byte1 r extract)
-    | 5 -> `Map (extract_list byte1 r extract_pair)
-    | 6 -> let _tag = extract_number byte1 r in extract r
+    | 5 -> `Map (extract_map byte1 r)
+    | 6 -> noncanonical "tagged value"
     | 7 ->
       begin match get_additional byte1 with
         | n when n < 20 -> `Simple n
@@ -215,11 +256,11 @@ module Simple = struct
       | `Text s -> bprintf b "\"%s\"" s
       | `Array l ->
         put "[";
-        l |> list_iteri (fun i x -> if i <> 0 then put ", "; write x);
+        l |> List.iteri (fun i x -> if i <> 0 then put ", "; write x);
         put "]"
       | `Map m ->
         put "{";
-        m |> list_iteri (fun i (k,v) -> if i <> 0 then put ", "; write k; put ": "; write v);
+        m |> List.iteri (fun i (k,v) -> if i <> 0 then put ", "; write k; put ": "; write v);
         put "}"
     in
     write item;
