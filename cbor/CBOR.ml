@@ -163,7 +163,7 @@ module Simple = struct
     Int64.unsigned_compare n n' < 0 ||
     Int64.unsigned_compare n n' = 0 &&
     begin
-      List.mem (major_typ s) [2; 3; 4; 5; 7 (* XXX: unsure about 7 *)] &&
+      List.mem (major_typ s) [2; 3; 4; 5] &&
       let len = Int64.to_int n in
       String.sub s off len < String.sub s' off len
     end
