@@ -102,7 +102,12 @@ let register_view origin user =
               });
             });
           }).catch(function (err) {
-            alert("exception: " + err);
+            // XXX: only if the exception came from navigator.credentials.create()
+            if (err.name === "InvalidStateError") {
+              alert("authenticator already registered");
+            } else {
+              alert("exception: " + err);
+            }
             window.location = "/";
           });
       });
