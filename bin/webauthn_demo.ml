@@ -242,7 +242,7 @@ let add_routes t =
 
   let logout req =
     Dream.invalidate_session req >>= fun () ->
-    Dream.redirect req "/"
+    Dream.redirect "/"
   in
 
   let base64 _req =
