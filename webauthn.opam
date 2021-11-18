@@ -29,6 +29,7 @@ depends: [
   "x509" {>= "0.13.0"}
   "base64" {>= "3.1.0"}
   "cstruct" {>= "6.0.0"}
+  "cbor" {>= "0.5"}
 ]
 
 synopsis: "WebAuthn - authenticating users to services using public key cryptography"
