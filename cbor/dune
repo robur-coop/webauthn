@@ -1,5 +1,0 @@
-(library
- (name cbor)
- (public_name webauthn.cbor)
- (wrapped false)
- (libraries ocplib-endian))
