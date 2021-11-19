@@ -32,6 +32,10 @@ depends: [
   "cbor" {>= "0.5"}
 ]
 
+conflicts: [
+  "result" {< "1.5"}
+]
+
 synopsis: "WebAuthn - authenticating users to services using public key cryptography"
 description: """
 WebAuthn is a web standard published by the W3C. Its goal is to
