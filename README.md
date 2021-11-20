@@ -1,13 +1,15 @@
 ## WebAuthn - authenticating users to services using public key cryptography
 
 WebAuthn is a web standard published by the W3C. Its goal is to
-standardize an interfacefor authenticating users to web-based
+standardize an interface for authenticating users to web-based
 applications and services using public key cryptography. Modern web
 browsers support WebAuthn functionality.
 
 WebAuthn provides two funcitons: register and authenticate. Usually the
-public and private keypair is stored on an external token (Yuikey etc.)
-or part of the platform (TPM). After the public key is registered, it can
+public-private keypair is stored on an external device, called security key
+(Yubikey, Trustkey etc.) or inside a platform(OS) authenticator. Platform
+authenticators are available on all modern platforms, such as Windows, Mac,
+Android and iOS. After the public key is registered, it can
 be used to authenticate to the same service.
 
 This module does not preserve a database of registered public keys, their
