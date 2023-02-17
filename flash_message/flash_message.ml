@@ -3,7 +3,7 @@ open Lwt.Syntax
 let five_minutes = 5. *. 60.
 
 
-let storage = Dream.new_local ~name:"dream.flash_message" ()
+let storage = Dream.new_field ~name:"dream.flash_message" ()
 
 
 let flash_cookie = "dream.flash_message"
@@ -11,13 +11,14 @@ let flash_cookie = "dream.flash_message"
 
 let flash_messages inner_handler request =
   let outbox = ref [] in
-  let request = Dream.with_local storage outbox request in
+  Dream.set_field request storage outbox;
   let* response = inner_handler request in
   Lwt.return(
     let entries = List.rev !outbox in
     let content = List.fold_right (fun (x,y) a -> `String x :: `String y :: a) entries [] in
     let value = `List content |> Yojson.Basic.to_string in
-    Dream.set_cookie flash_cookie value request response ~max_age:five_minutes
+    Dream.set_cookie response request flash_cookie value ~max_age:five_minutes;
+    response
   )
 
 
@@ -33,7 +34,7 @@ let get_flash request =
   let unpack u = match u with
       | `String x -> x
       | _ -> failwith "Bad flash message content" in
-  let x = Dream.cookie flash_cookie request
+  let x = Dream.cookie request flash_cookie
           |>? fun value ->
           match Yojson.Basic.from_string value with
           | `List y -> Some (group @@ List.map unpack y)
@@ -42,7 +43,7 @@ let get_flash request =
 
 
 let put_flash category message request =
-  let outbox = match Dream.local storage request with
+  let outbox = match Dream.field request storage with
   | Some outbox -> outbox
   | None ->
     let message = "Missing flash message middleware" in
