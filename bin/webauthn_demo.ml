@@ -74,7 +74,7 @@ let add_routes t =
   in
 
   let registration_challenge req =
-    let user = Dream.param "user" req in
+    let user = Dream.param req "user" in
     let challenge, challenge_b64 = Webauthn.generate_challenge () in
     let userid, credentials = match find_username user with
       | None -> gen_data ~alphabet:Base64.uri_safe_alphabet 8, []
@@ -100,7 +100,7 @@ let add_routes t =
   in
 
   let register_finish req =
-    let userid = Dream.param "userid" req in
+    let userid = Dream.param req "userid" in
     Dream.body req >>= fun body ->
     Logs.debug (fun m -> m "received body: %s" body);
     match Hashtbl.find_opt registration_challenges userid with
@@ -168,7 +168,7 @@ let add_routes t =
   in
 
   let authenticate req =
-    let userid = Dream.param "userid" req in
+    let userid = Dream.param req "userid" in
     match Hashtbl.find_opt users userid with
     | None ->
       Logs.warn (fun m -> m "no user found");
@@ -182,8 +182,8 @@ let add_routes t =
   in
 
   let authenticate_finish req =
-    let userid = Dream.param "userid" req
-    and b64_credential_id = Dream.param "credential_id" req
+    let userid = Dream.param req "userid"
+    and b64_credential_id = Dream.param req "credential_id"
     in
     match Base64.decode ~alphabet:Base64.uri_safe_alphabet ~pad:false b64_credential_id with
     | Error `Msg err ->
@@ -262,18 +262,17 @@ let add_routes t =
   ]
 
 
-let setup_app level port host origin https =
+let setup_app level port host origin tls =
   let level = match level with None -> None | Some Logs.Debug -> Some `Debug | Some Info -> Some `Info | Some Warning -> Some `Warning | Some Error -> Some `Error | Some App -> None in
   Dream.initialize_log ?level ();
   match Webauthn.create origin with
   | Error e -> Logs.err (fun m -> m "failed to create webauthn: %s" e); exit 1
   | Ok webauthn ->
-    Dream.run ~port ~interface:host ~https
+    Dream.run ~port ~interface:host ~tls
     @@ Dream.logger
     @@ Dream.memory_sessions
     @@ Flash_message.flash_messages
     @@ add_routes webauthn
-    @@ Dream.not_found
 
 open Cmdliner
 
@@ -294,9 +293,6 @@ let tls =
   Arg.(value & flag & info [ "tls" ] ~doc)
 
 let () =
-  let term = Term.(pure setup_app $ Logs_cli.level () $ port $ host $ origin $ tls) in
-  let info = Term.info "Webauthn app" ~doc:"Webauthn app" ~man:[] in
-  match Term.eval (term, info) with
-  | `Ok () -> exit 0
-  | `Error _ -> exit 1
-  | _ -> exit 0
+  let term = Term.(const setup_app $ Logs_cli.level () $ port $ host $ origin $ tls) in
+  let info = Cmd.info "Webauthn app" ~doc:"Webauthn app" ~man:[] in
+  exit (Cmd.eval (Cmd.v info term))
