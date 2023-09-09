@@ -1,8 +1,8 @@
 opam-version: "2.0"
-homepage: "https://github.com/roburio/webauthn"
-dev-repo: "git+https://github.com/roburio/webauthn.git"
-bug-reports: "https://github.com/roburio/webauthn/issues"
-doc: "https://roburio.github.io/webauthn/doc"
+homepage: "https://github.com/robur-coop/webauthn"
+dev-repo: "git+https://github.com/robur-coop/webauthn.git"
+bug-reports: "https://github.com/robur-coop/webauthn/issues"
+doc: "https://robur-coop.github.io/webauthn/doc"
 maintainer: [ "team@robur.coop" ]
 authors: [ "Reynir Björnsson <reynir@reynir.dk>" "Hannes Mehnert <hannes@mehnert.org>" ]
 license: "BSD-2-Clause"

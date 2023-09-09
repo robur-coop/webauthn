@@ -24,7 +24,7 @@ running at [webauthn-demo.robur.coop](https://webauthn-demo.robur.coop).
 
 ## Documentation
 
-[API documentation](https://roburio.github.io/webauthn/doc) is available online.
+[API documentation](https://robur-coop.github.io/webauthn/doc) is available online.
 
 ## Installation
 

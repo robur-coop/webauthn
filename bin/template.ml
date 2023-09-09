@@ -148,7 +148,7 @@ let authenticate_view challenge credentials user =
         let clientDataJSON = new Uint8Array(assertion.response.clientDataJSON);
         let signature = new Uint8Array(assertion.response.signature);
         let userHandle = assertion.response.userHandle ? new Uint8Array(assertion.response.userHandle) : null;
- 
+
         let body =
           JSON.stringify({
             authenticatorData: bufferEncode(authenticatorData),
