@@ -5,8 +5,8 @@ standardize an interface for authenticating users to web-based
 applications and services using public key cryptography. Modern web
 browsers support WebAuthn functionality.
 
-WebAuthn provides two funcitons: register and authenticate. Usually the
-public-private keypair is stored on an external device, called security key
+WebAuthn provides two functions: register and authenticate. Usually the
+public-private keypair is stored on an external device, called a security key
 (Yubikey, Trustkey etc.) or inside a platform(OS) authenticator. Platform
 authenticators are available on all modern platforms, such as Windows, Mac,
 Android and iOS. After the public key is registered, it can
