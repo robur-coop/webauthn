@@ -7,7 +7,7 @@ type decoding_error = [
   | `Base64_decoding of string * string * string
   | `CBOR_decoding of string * string * string
   | `Unexpected_CBOR of string * string * CBOR.Simple.t
-  | `Binary_decoding of string * string * Cstruct.t
+  | `Binary_decoding of string * string * string
   | `Attestation_object_decoding of string * string * string
 ]
 
@@ -35,7 +35,7 @@ let pp_error ppf = function
   | `Unexpected_CBOR (ctx, msg, data) ->
     Fmt.pf ppf "unexpected cbor in %s: %s (data: %s)" ctx msg (CBOR.Simple.to_diagnostic data)
   | `Binary_decoding (ctx, msg, data) ->
-    Fmt.pf ppf "binary decoding error in %s: %s (data: %a)" ctx msg Cstruct.hexdump_pp data
+    Fmt.pf ppf "binary decoding error in %s: %s (data: %a)" ctx msg (Ohex.pp_hexdump ()) data
   | `Attestation_object_decoding (ctx, msg, data) ->
     Fmt.pf ppf "attestation object decoding error in %s: %s (data: %s)" ctx msg data
   | `Unsupported_key_type i ->
@@ -67,7 +67,7 @@ type challenge = string
 
 let generate_challenge ?(size = 32) () =
   if size < 16 then invalid_arg "size must be at least 16 bytes";
-  let ch = Mirage_crypto_rng.generate size |> Cstruct.to_string in
+  let ch = Mirage_crypto_rng.generate size in
   ch, Base64.encode_string ch
 
 let challenge_to_string c = c
@@ -131,11 +131,10 @@ let cose_pubkey cbor_data =
    guard (crv = 1) (`Unsupported_elliptic_curve crv) >>= fun () ->
    extract_k_i "cose pubkey x" kv (-2) >>= extract_bytes "cose pubkey x" >>= fun x ->
    extract_k_i "cose pubkey y" kv (-3) >>= extract_bytes "cose pubkey y" >>= fun y ->
-   let four = Cstruct.create 1 in Cstruct.set_uint8 four 0 4;
-   let cs = Cstruct.concat [ four ; Cstruct.of_string x ; Cstruct.of_string y ] in
+   let str = String.concat "" [ "\004" ; x ; y ] in
    Result.map_error
      (fun e -> `Invalid_public_key (Fmt.to_to_string Mirage_crypto_ec.pp_error e))
-     (Mirage_crypto_ec.P256.Dsa.pub_of_cstruct cs)
+     (Mirage_crypto_ec.P256.Dsa.pub_of_octets str)
 
 let decode_partial_cbor ctx data =
   try Ok (CBOR.Simple.decode_partial data)
@@ -145,20 +144,23 @@ let decode_cbor ctx data =
   try Ok (CBOR.Simple.decode data)
   with CBOR.Error m -> Error (`CBOR_decoding (ctx, "failed to decode CBOR " ^ m, data))
 
-let guard_length ctx len cs =
-  guard (Cstruct.length cs >= len)
-    (`Binary_decoding (ctx, "too short (< " ^ string_of_int len ^ ")", cs))
+let guard_length ctx len str =
+  guard (String.length str >= len)
+    (`Binary_decoding (ctx, "too short (< " ^ string_of_int len ^ ")", str))
 
 let parse_attested_credential_data data =
   guard_length "attested credential data" 18 data >>= fun () ->
-  let aaguid = Cstruct.sub data 0 16 in
-  let cid_len = Cstruct.BE.get_uint16 data 16 in
-  let rest = Cstruct.shift data 18 in
+  let aaguid = String.sub data 0 16 in
+  let cid_len = String.get_uint16_be data 16 in
+  let rest = String.sub data 18 (String.length data - 18) in
   guard_length "attested credential data" cid_len rest >>= fun () ->
-  let cid, pubkey = Cstruct.split rest cid_len in
-  decode_partial_cbor "public key" (Cstruct.to_string pubkey) >>= fun (pubkey, rest) ->
+  let cid, pubkey =
+    String.sub rest 0 cid_len,
+    String.sub rest cid_len (String.length rest - cid_len)
+  in
+  decode_partial_cbor "public key" pubkey >>= fun (pubkey, rest) ->
   cose_pubkey pubkey >>= fun pubkey ->
-  Ok ((aaguid, cid, pubkey), Cstruct.of_string rest)
+  Ok ((aaguid, cid, pubkey), rest)
 
 let string_keys ctx kv =
   List.fold_right (fun (k, v) acc ->
@@ -169,17 +171,17 @@ let string_keys ctx kv =
     kv (Ok [])
 
 let parse_extension_data data =
-   decode_partial_cbor "extension data" (Cstruct.to_string data) >>= fun (data, rest) ->
+   decode_partial_cbor "extension data" data >>= fun (data, rest) ->
    extract_map "extension data" data >>= fun kv ->
    string_keys "extension data" kv >>= fun kv ->
-   Ok (kv, Cstruct.of_string rest)
+   Ok (kv, rest)
 
 type auth_data = {
-  rpid_hash : Cstruct.t ;
+  rpid_hash : string ;
   user_present : bool ;
   user_verified : bool ;
   sign_count : Int32.t ;
-  attested_credential_data : (Cstruct.t * Cstruct.t * Mirage_crypto_ec.P256.Dsa.pub) option ;
+  attested_credential_data : (string * string * Mirage_crypto_ec.P256.Dsa.pub) option ;
   extension_data : (string * CBOR.Simple.t) list option ;
 }
 
@@ -188,21 +190,20 @@ let flags byte =
   b 0, b 2, b 6, b 7
 
 let parse_auth_data data =
-  let data = Cstruct.of_string data in
   guard_length "authenticator data" 37 data >>= fun () ->
-  let rpid_hash = Cstruct.sub data 0 32 in
+  let rpid_hash = String.sub data 0 32 in
   let user_present, user_verified, attested_data_included, extension_data_included =
-    flags (Cstruct.get_uint8 data 32)
+    flags (String.get_uint8 data 32)
   in
-  let sign_count = Cstruct.BE.get_uint32 data 33 in
-  let rest = Cstruct.shift data 37 in
+  let sign_count = String.get_int32_be data 33 in
+  let rest = String.sub data 37 (String.length data - 37) in
   (if attested_data_included then
      Result.map (fun (d, r) -> Some d, r) (parse_attested_credential_data rest)
    else Ok (None, rest)) >>= fun (attested_credential_data, rest) ->
   (if extension_data_included then
      Result.map (fun (d, r) -> Some d, r) (parse_extension_data rest)
    else Ok (None, rest)) >>= fun (extension_data, rest) ->
-  guard (Cstruct.length rest = 0) (`Binary_decoding ("authenticator data", "leftover", rest)) >>= fun () ->
+  guard (String.length rest = 0) (`Binary_decoding ("authenticator data", "leftover", rest)) >>= fun () ->
   Ok { rpid_hash ; user_present ; user_verified ; sign_count ; attested_credential_data ; extension_data }
 
 let parse_attestation_statement fmt data =
@@ -217,7 +218,7 @@ let parse_attestation_statement fmt data =
         extract_bytes "attestation statement x5c" c >>= fun c ->
         Result.map_error
           (function `Msg m -> `Attestation_object_decoding ("attestation statement x5c", m, String.escaped c))
-          (X509.Certificate.decode_der (Cstruct.of_string c))
+          (X509.Certificate.decode_der c)
       | cs -> Error (`Attestation_object_decoding ("attestation statement x5c", "expected single certificate", String.concat "," (List.map CBOR.Simple.to_diagnostic cs)))
     end >>= fun cert ->
     Ok (Some (cert, signature))
@@ -311,8 +312,9 @@ let register_response_of_string =
 
 let register t response =
   (* XXX: credential.getClientExtensionResults() *)
-  let client_data_hash = Mirage_crypto.Hash.SHA256.digest
-    (Cstruct.of_string response.client_data_json) in
+  let client_data_hash =
+    Digestif.SHA256.(to_raw_string (digest_string response.client_data_json))
+  in
   begin try Ok (Yojson.Safe.from_string response.client_data_json)
     with Yojson.Json_error msg ->
       Error (`Json_decoding ("clientDataJSON", msg, response.client_data_json))
@@ -335,22 +337,21 @@ let register t response =
       Ok None
   end >>= fun client_extensions ->
   parse_attestation_object response.attestation_object >>= fun (auth_data, attestation_statement) ->
-  let rpid_hash = Mirage_crypto.Hash.SHA256.digest (Cstruct.of_string (rpid t)) in
-  guard (Cstruct.equal auth_data.rpid_hash rpid_hash)
-    (`Rpid_hash_mismatch (Cstruct.to_string rpid_hash, Cstruct.to_string auth_data.rpid_hash)) >>= fun () ->
+  let rpid_hash =
+    Digestif.SHA256.(to_raw_string (digest_string (rpid t))) in
+  guard (String.equal auth_data.rpid_hash rpid_hash)
+    (`Rpid_hash_mismatch (rpid_hash, auth_data.rpid_hash)) >>= fun () ->
   (* verify user present, user verified flags in auth_data.flags *)
   Option.to_result ~none:`Missing_credential_data
     auth_data.attested_credential_data >>= fun (aaguid, credential_id, public_key) ->
   begin match attestation_statement with
    | None -> Ok None
    | Some (cert, signature) ->
-     let pub_cs = Mirage_crypto_ec.P256.Dsa.pub_to_cstruct public_key in
-     let sigdata = Cstruct.concat [
-       Cstruct.create 1 ; rpid_hash ; client_data_hash ; credential_id ; pub_cs
+     let pub_cs = Mirage_crypto_ec.P256.Dsa.pub_to_octets public_key in
+     let sigdata = String.concat "" [
+       "\000" ; rpid_hash ; client_data_hash ; credential_id ; pub_cs
      ] in
-     let pk = X509.Certificate.public_key cert
-     and signature = Cstruct.of_string signature
-     in
+     let pk = X509.Certificate.public_key cert in
      Result.map_error (function `Msg m -> `Signature_verification m)
        (X509.Public_key.verify `SHA256 ~signature pk (`Message sigdata)) >>= fun () ->
      Ok (Some cert)
@@ -359,8 +360,8 @@ let register t response =
   (* check auth_data.attested_credential_data.credential_id is not registered ? *)
   let registration =
     let attested_credential_data = {
-      aaguid = Cstruct.to_string aaguid ;
-      credential_id = Cstruct.to_string credential_id ;
+      aaguid ;
+      credential_id ;
       public_key
     } in
     {
@@ -394,8 +395,9 @@ let authenticate_response_of_string =
   of_json "authenticate response" authenticate_response_of_yojson
 
 let authenticate t public_key response =
-  let client_data_hash = Mirage_crypto.Hash.SHA256.digest
-    (Cstruct.of_string response.client_data_json) in
+  let client_data_hash =
+    Digestif.SHA256.(to_raw_string (digest_string response.client_data_json))
+  in
   begin try Ok (Yojson.Safe.from_string response.client_data_json)
     with Yojson.Json_error msg ->
       Error (`Json_decoding ("clientDataJSON", msg, response.client_data_json))
@@ -418,12 +420,11 @@ let authenticate t public_key response =
       Ok None
   end >>= fun client_extensions ->
   parse_auth_data response.authenticator_data >>= fun auth_data ->
-  let rpid_hash = Mirage_crypto.Hash.SHA256.digest (Cstruct.of_string (rpid t)) in
-  guard (Cstruct.equal auth_data.rpid_hash rpid_hash)
-    (`Rpid_hash_mismatch (Cstruct.to_string rpid_hash, Cstruct.to_string auth_data.rpid_hash)) >>= fun () ->
-  let sigdata = Cstruct.concat [ Cstruct.of_string response.authenticator_data ; client_data_hash ]
-  and signature = Cstruct.of_string response.signature
-  in
+  let rpid_hash = Digestif.SHA256.(to_raw_string (digest_string (rpid t))) in
+  guard (String.equal auth_data.rpid_hash rpid_hash)
+    (`Rpid_hash_mismatch (rpid_hash, auth_data.rpid_hash)) >>= fun () ->
+  let sigdata =  response.authenticator_data ^ client_data_hash
+  and signature = response.signature in
   Result.map_error (function `Msg m -> `Signature_verification m)
     (X509.Public_key.verify `SHA256 ~signature (`P256 public_key) (`Message sigdata)) >>= fun () ->
   let authentication = {
@@ -466,7 +467,7 @@ let transports =
 let decode_strict codec cs =
   match Asn.decode codec cs with
   | Ok (a, cs) ->
-    guard (Cstruct.length cs = 0) (`Msg "trailing bytes") >>= fun () ->
+    guard (String.length cs = 0) (`Msg "trailing bytes") >>= fun () ->
     Ok a
   | Error (`Parse msg) -> Error (`Msg msg)
 
