@@ -16,20 +16,21 @@ build: [
 depends: [
   "ocaml" {>= "4.08.0"}
   "dune" {>= "2.7"}
-  "dream" {dev & >= "1.0.0~alpha4"}
+  "dream" {dev & >= "1.0.0~alpha7"}
   "ppx_blob" {dev}
   "cmdliner" {dev & >= "1.1.0"}
   "logs" {dev}
   "lwt" {dev}
   "yojson"
   "ppx_deriving_yojson"
-  "mirage-crypto-ec"
-  "mirage-crypto-rng"
+  "digestif"
+  "mirage-crypto-ec" {>= "1.1.0"}
+  "mirage-crypto-rng" {>= "1.1.0"}
   "ocplib-endian"
-  "x509" {>= "0.13.0"}
+  "x509" {>= "1.0.2"}
   "base64" {>= "3.1.0"}
-  "cstruct" {>= "6.0.0"}
   "cbor" {>= "0.5"}
+  "ohex" {>= "0.2.0"}
 ]
 
 conflicts: [

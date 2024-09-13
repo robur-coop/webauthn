@@ -48,7 +48,7 @@ type decoding_error = [
   | `Base64_decoding of string * string * string
   | `CBOR_decoding of string * string * string
   | `Unexpected_CBOR of string * string * CBOR.Simple.t
-  | `Binary_decoding of string * string * Cstruct.t
+  | `Binary_decoding of string * string * string
   | `Attestation_object_decoding of string * string * string
 ]
 
