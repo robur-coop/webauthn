@@ -1,0 +1,29 @@
+#!/bin/sh
+
+. /etc/rc.subr
+
+name="webauthn_demo"
+title="webauthn-demo"
+rcvar="${name}_enable"
+
+pidfile="/var/run/${name}/${name}.pid"
+# Change this if you place the demo binary elsewhere
+exec_path="/home/builder/webauthn/${name}.exe"
+
+start_precmd="webauthn_demo_precmd"
+
+load_rc_config "$name"
+
+: ${webauthn_demo_enable:="NO"}
+: ${webauthn_demo_user:="builder"}
+
+webauthn_demo_precmd () {
+  # Create the parent directory for the pidfile with owner
+  # ${webauthn_demo_user} as daemon(8) will not have permissions for /var/run/
+  install -d -o "${webauthn_demo_user}" "/var/run/${name}"
+}
+
+command="/usr/sbin/daemon"
+command_args="-r -S -t ${title} -P ${pidfile} ${exec_path}"
+
+run_rc_command "$1"
