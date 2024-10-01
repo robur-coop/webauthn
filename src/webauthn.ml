@@ -448,11 +448,11 @@ type transport = [
 ]
 
 let pp_transport ppf = function
-  | `Bluetooth_classic -> Fmt.string ppf "Bluetooth classic"
-  | `Bluetooth_low_energy -> Fmt.string ppf "Bluetooth low energy"
+  | `Bluetooth_classic -> Fmt.string ppf "BluetoothClassic"
+  | `Bluetooth_low_energy -> Fmt.string ppf "BluetoothLowEnergy"
   | `Usb -> Fmt.string ppf "USB"
   | `Nfc -> Fmt.string ppf "NFC"
-  | `Usb_internal -> Fmt.string ppf "USB internal"
+  | `Usb_internal -> Fmt.string ppf "USBInternal"
 
 let transports =
   let opts = [
