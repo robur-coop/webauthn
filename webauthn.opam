@@ -17,7 +17,7 @@ depends: [
   "ocaml" {>= "4.08.0"}
   "dune" {>= "2.7"}
   "dream" {dev & >= "1.0.0~alpha7"}
-  "ppx_blob" {dev}
+  "ppx_blob" {dev & >= "0.9.0"}
   "cmdliner" {dev & >= "1.1.0"}
   "logs" {dev}
   "lwt" {dev}
@@ -27,7 +27,7 @@ depends: [
   "mirage-crypto-ec" {>= "1.1.0"}
   "mirage-crypto-rng" {>= "1.1.0"}
   "ocplib-endian"
-  "x509" {>= "1.0.2"}
+  "x509" {>= "1.0.4"}
   "base64" {>= "3.1.0"}
   "cbor" {>= "0.5"}
   "ohex" {>= "0.2.0"}
