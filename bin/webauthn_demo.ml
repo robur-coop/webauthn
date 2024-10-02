@@ -1,5 +1,20 @@
 open Lwt.Infix
 
+let pp_cert =
+  let pp_extensions ppf (oid, data) =
+    let fido_u2f_transport_oid_name = "id-fido-u2f-ce-transports" in
+    if Asn.OID.equal oid Webauthn.fido_u2f_transport_oid then
+      match Webauthn.decode_transport data with
+      | Error `Msg _ ->
+        Fmt.pf ppf "%s invalid-data %a" fido_u2f_transport_oid_name (Ohex.pp_hexdump ()) data
+      | Ok transports ->
+        Fmt.pf ppf "%s %a" fido_u2f_transport_oid_name
+          Fmt.(list ~sep:(any ",") Webauthn.pp_transport) transports
+    else
+      Fmt.pf ppf "unsupported %a: %a" Asn.OID.pp oid (Ohex.pp_hexdump ()) data
+  in
+  X509.Certificate.pp' pp_extensions
+
 let users : (string, string * (Mirage_crypto_ec.P256.Dsa.pub * string * X509.Certificate.t option) list) Hashtbl.t = Hashtbl.create 7
 
 let find_username username =
@@ -140,7 +155,7 @@ let add_routes t =
                 Option.fold ~none:("No certificate", "No certificate", Ok [])
                   ~some:(fun c ->
                            X509.Certificate.encode_pem c,
-                           Fmt.to_to_string X509.Certificate.pp c,
+                           Fmt.to_to_string pp_cert c,
                            Webauthn.transports_of_cert c)
                   certificate
               in
