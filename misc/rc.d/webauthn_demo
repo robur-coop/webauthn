@@ -1,0 +1,23 @@
+#!/bin/sh
+
+. /etc/rc.subr
+
+name="webauthn_demo"
+title="webauthn-demo"
+rcvar="${name}_enable"
+
+pidfile="/var/run/${name}.pid"
+# Change this if you place the demo binary elsewhere
+exec_path="/home/builder/webauthn/${name}.exe"
+
+load_rc_config "$name"
+
+: ${webauthn_demo_enable:="NO"}
+# We can't use $webauthn_demo_user as otherwise daemon(8) will run unprivileged
+# and can't create the pidfile and drop privileges
+: ${webauthn_demo_runas:="builder"}
+
+command="/usr/sbin/daemon"
+command_args="-r -S -t ${title} -P ${pidfile} -u ${webauthn_demo_runas} ${exec_path}"
+
+run_rc_command "$1"
