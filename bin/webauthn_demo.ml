@@ -6,7 +6,7 @@ let pp_cert =
     if Asn.OID.equal oid Webauthn.fido_u2f_transport_oid then
       match Webauthn.decode_transport data with
       | Error `Msg _ ->
-        Fmt.pf ppf "%s invalid-data" fido_u2f_transport_oid_name
+        Fmt.pf ppf "%s invalid-data %a" fido_u2f_transport_oid_name (Ohex.pp_hexdump ()) data
       | Ok transports ->
         Fmt.pf ppf "%s %a" fido_u2f_transport_oid_name
           Fmt.(list ~sep:(any ",") Webauthn.pp_transport) transports
