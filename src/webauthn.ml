@@ -258,9 +258,14 @@ let json_assoc thing : Yojson.Safe.t -> ((string * Yojson.Safe.t) list, _) resul
   | `Assoc s -> Ok s
   | json -> Error (`Json_decoding (thing, "non-assoc", Yojson.Safe.to_string json))
 
+let starts_with ~prefix str =
+  let len = String.length prefix in
+  String.length str >= len && StringLabels.sub str ~pos:0 ~len = prefix
+
 let create origin =
   match String.split_on_char '/' origin with
-  | [ "https:" ; "" ; host_port ] ->
+  | [ proto ; "" ; host_port ]
+      when proto = "https:" || proto = "http:" && starts_with ~prefix:"localhost:" host_port ->
     let host_ok h =
       match Domain_name.of_string h with
       | Error (`Msg m) -> Error ("origin is not a domain name " ^ m ^ "(data: " ^ h ^ ")")
