@@ -29,7 +29,7 @@
 (** The type of a webauthn state, containing the [origin]. *)
 type t
 
-(** [create origin] is a webauthn state, or an error if the origin does not
+(** [create origin] is a webauthn state, or an error if [origin] does not
     meet the specification: schema must be https, the host must be a valid
     hostname. An optional port is supported: https://example.com:4444
 
@@ -120,7 +120,7 @@ type register_response
     clientDataJSON - both Base64 URI safe encoded). The result is a
     register_response or a decoding error. *)
 val register_response_of_string : string ->
-  (register_response, json_decoding_error) result
+  (register_response, [> json_decoding_error]) result
 
 (** [register t response] registers the response, and returns the used
     challenge and a registration. The challenge needs to be verified to be
@@ -129,7 +129,7 @@ val register_response_of_string : string ->
     chain between certificate and public key. The certificate should be
     validated by the caller. *)
 val register : t -> register_response ->
-  (challenge * registration, error) result
+  (challenge * registration, [> error]) result
 
 (** The type for an authentication. *)
 type authentication = {
@@ -148,7 +148,7 @@ type authenticate_response
     clientDataJSON, signature, userHandle). If decoding fails, an
     error is reported. *)
 val authenticate_response_of_string : string ->
-  (authenticate_response, json_decoding_error) result
+  (authenticate_response, [> json_decoding_error]) result
 
 (** [authenticate t public_key response] authenticates [response], by checking
     the signature with the [public_key]. If it is valid, the used [challenge]
@@ -157,7 +157,7 @@ val authenticate_response_of_string : string ->
     public key corresponding to the credential id returned by the client web
     browser. *)
 val authenticate : t -> Mirage_crypto_ec.P256.Dsa.pub -> authenticate_response ->
-  (challenge * authentication, error) result
+  (challenge * authentication, [> error]) result
 
 (** The type of FIDO U2F transports. *)
 type transport = [
@@ -183,4 +183,4 @@ val decode_transport : string -> (transport list, [> `Msg of string ]) result
     authenticator transports extension (OID 1.3.6.1.4.1.45724.2.1.1) from the
     [certificate].  *)
 val transports_of_cert : X509.Certificate.t ->
-  (transport list, [`Msg of string]) result
+  (transport list, [> `Msg of string]) result

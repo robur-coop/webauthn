@@ -68,7 +68,7 @@ type challenge = string
 let generate_challenge ?(size = 32) () =
   if size < 16 then invalid_arg "size must be at least 16 bytes";
   let ch = Mirage_crypto_rng.generate size in
-  ch, Base64.encode_string ch
+  ch, Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet ch
 
 let challenge_to_string c = c
 let challenge_of_string s = Some s
@@ -306,7 +306,7 @@ type registration = {
 type register_response = {
   attestation_object : base64url_string [@key "attestationObject"];
   client_data_json : base64url_string [@key "clientDataJSON"];
-} [@@deriving of_yojson]
+} [@@deriving of_yojson { strict = false }]
 
 let register_response_of_string =
   of_json "register response" register_response_of_yojson
@@ -390,7 +390,7 @@ type authenticate_response = {
   client_data_json : base64url_string [@key "clientDataJSON"];
   signature : base64url_string ;
   userHandle : base64url_string option ;
-} [@@deriving of_yojson]
+} [@@deriving of_yojson { strict = false }]
 
 let authenticate_response_of_string =
   of_json "authenticate response" authenticate_response_of_yojson
