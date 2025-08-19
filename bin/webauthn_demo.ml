@@ -35,7 +35,23 @@ let counters = KhPubHashtbl.create 7
 let check_counter kh_pub counter =
   let r =
     match KhPubHashtbl.find_opt counters kh_pub with
-    | Some counter' -> Int32.unsigned_compare counter counter' > 0
+    | Some counter' ->
+      (* As per https://w3c.github.io/webauthn/#sctn-sign-counter
+
+         Authenticators that do not implement a signature counter leave the
+         signCount in the authenticator data constant at zero.
+
+         [...] In subsequent authenticatorGetAssertion operations, the Relying
+         Party compares the stored signature counter value with the new
+         signCount value returned in the assertion’s authenticator data. If
+         either is non-zero, and the new signCount value is less than or equal
+         to the stored value, a cloned authenticator may exist, or the
+         authenticator may be malfunctioning, or a race condition might exist
+         where the relying party is receiving and processing assertions in an
+         order other than the order they were generated at the authenticator.
+      *)
+      Int32.unsigned_compare counter counter' > 0
+      || Int32.equal counter Int32.zero && Int32.equal counter' Int32.zero
     | None -> true
   in
   if r

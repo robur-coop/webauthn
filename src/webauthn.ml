@@ -260,7 +260,8 @@ let json_assoc thing : Yojson.Safe.t -> ((string * Yojson.Safe.t) list, _) resul
 
 let create origin =
   match String.split_on_char '/' origin with
-  | [ "https:" ; "" ; host_port ] ->
+  | [ proto ; "" ; host_port ]
+      when proto = "https:" || proto = "http:" && (String.equal host_port "localhost" || String.starts_with ~prefix:"localhost:" host_port) ->
     let host_ok h =
       match Domain_name.of_string h with
       | Error (`Msg m) -> Error ("origin is not a domain name " ^ m ^ "(data: " ^ h ^ ")")
