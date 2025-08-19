@@ -33,8 +33,8 @@ type t
     meet the specification: schema must be https, the host must be a valid
     hostname. An optional port is supported: https://example.com:4444
 
-    For local development purposes, it is allowed to specify an origin like
-    [http://localhost:PORT] where [PORT] is a port number. *)
+    For local development purposes, it is allowed to specify an origin with
+    scheme [http] {e and} host [localhost]. *)
 val create : string -> (t, string) result
 
 (** [rpid t] is the relying party ID. Specifically, it is the effective domain
