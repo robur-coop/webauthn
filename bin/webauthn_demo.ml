@@ -84,8 +84,8 @@ let remove_authentication_challenge userid challenge =
 
 let to_string err = Format.asprintf "%a" Webauthn.pp_error err
 
-let gen_data ?(pad = false) ?alphabet length =
-  Base64.encode_string ~pad ?alphabet
+let gen_data length =
+  Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
     (Mirage_crypto_rng.generate length)
 
 let add_routes t =
@@ -98,7 +98,7 @@ let add_routes t =
   let register req =
     let user =
       match Dream.session_field req "authenticated_as" with
-      | None -> gen_data ~alphabet:Base64.uri_safe_alphabet 8
+      | None -> gen_data 8
       | Some username -> username
     in
     Dream.html (Template.register_view (Webauthn.rpid t) user)
@@ -108,7 +108,7 @@ let add_routes t =
     let user = Dream.param req "user" in
     let challenge, challenge_b64 = Webauthn.generate_challenge () in
     let userid, credentials = match find_username user with
-      | None -> gen_data ~alphabet:Base64.uri_safe_alphabet 8, []
+      | None -> gen_data 8, []
       | Some (userid, (_, credentials)) -> userid, List.map (fun (_, cid, _) -> cid) credentials
     in
     let challenges =
@@ -123,7 +123,7 @@ let add_routes t =
           "name", `String user ;
           "displayName", `String user ;
         ] ;
-        "excludeCredentials", `List (List.map (fun s -> `String (Base64.encode_string s)) credentials) ;
+        "excludeCredentials", `List (List.map (fun s -> `String (Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet s)) credentials) ;
       ]
     in
     Logs.info (fun m -> m "produced challenge for user %s: %s" user challenge_b64);
@@ -205,7 +205,7 @@ let add_routes t =
       Logs.warn (fun m -> m "no user found");
       Dream.respond ~status:`Bad_Request "Bad request."
     | Some (username, keys) ->
-      let credentials = List.map (fun (_, c, _) -> Base64.encode_string c) keys in
+      let credentials = List.map (fun (_, c, _) -> Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet c) keys in
       let challenge, challenge_b64 = Webauthn.generate_challenge () in
       let challenges = Option.value ~default:[] (Hashtbl.find_opt authentication_challenges userid) in
       Hashtbl.replace authentication_challenges userid (challenge :: challenges);
