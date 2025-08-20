@@ -7,9 +7,6 @@ let page s b =
       <script>
       function bufferEncode(value) {
         return base64js.fromByteArray(value)
-               .replace(/\+/g, "-")
-               .replace(/\//g, "_")
-               .replace(/=/g, "");
       }
       function bufferDecode(value) {
         return base64js.toByteArray(value);
