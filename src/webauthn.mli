@@ -1,6 +1,6 @@
 (** WebAuthn - authenticating users to services using public key cryptography
 
-    For a simple passkey-focused API, see the {!Simple} module.
+    For a simplified passkey-focused API, see the {!Simple} module.
 
     WebAuthn is a web standard published by the W3C. Its goal is to
     standardize an interfacefor authenticating users to web-based
@@ -267,7 +267,7 @@ module Simple : sig
 
       Suggested storage schema (adapt to your needs):
 
-      {[
+      {@sql[
       create table passkey (
         id text primary key,
         user_id text not null foreign key references user (id),
@@ -279,27 +279,22 @@ module Simple : sig
 
   val generate_registration_options :
     ?attestation:string ->
-    ?attestation_formats:string list ->
     ?exclude_credentials:credential list ->
-    ?pub_key_cred_params:cred_param list ->
     ?timeout:float ->
     ?user_id:string ->
     user_name:string ->
     display_name:string ->
     t ->
     public_key_credential_creation_options
-  (** [generate_registration_options ?attestation ?attestation_formats
-      ?exclude_credentials ?pub_key_cred_params ?timeout ?user_id ~user_name
-      ~display_name webauthn] is an options object that can be encoded into a
-      JSON string and then decoded in the browser. Parameters are as described
-      here:
+  (** [generate_registration_options ?attestation ?exclude_credentials ?timeout
+      ?user_id ~user_name ~display_name webauthn] is an options object that can
+      be encoded into a JSON string and then decoded in the browser. Parameters
+      are as described here:
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
         https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
 
       @param user_id defaults to a randomly-generated 16-byte string. Override it
         to specify IDs from your user database.
-      @param attestation_formats defaults to [fido-u2f]
-      @param pub_key_cred_params defaults to [{"type": "public-key", "alg": -7}]
 
       Example usage in server:
 

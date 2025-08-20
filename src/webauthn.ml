@@ -548,9 +548,7 @@ module Simple = struct
 
   let generate_registration_options
     ?attestation
-    ?(attestation_formats=[])
     ?(exclude_credentials=[])
-    ?(pub_key_cred_params=[])
     ?timeout
     ?(user_id=Mirage_crypto_rng.generate 16)
     ~user_name
@@ -559,18 +557,10 @@ module Simple = struct
     let user_id = b64enc user_id in
     {
       attestation;
-      attestation_formats = (
-        match attestation_formats with
-        | [] -> ["fido-u2f"]
-        | _ -> attestation_formats
-      );
+      attestation_formats = ["fido-u2f"];
       challenge = fst (generate_challenge ());
       exclude_credentials;
-      pub_key_cred_params = (
-        match pub_key_cred_params with
-        | [] -> [{ type_ = "public-key"; alg = -7 }]
-        | _ -> pub_key_cred_params
-      );
+      pub_key_cred_params = [{ type_ = "public-key"; alg = -7 }];
       rp = { id = rpid webauthn; name = webauthn.name };
       timeout;
       user = { id = user_id; name = user_name; display_name = display_name };
