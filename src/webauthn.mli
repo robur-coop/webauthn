@@ -291,7 +291,7 @@ module Simple : sig
       be encoded into a JSON string and then decoded in the browser. Parameters
       are as described here:
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
-        https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
+      https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
 
       @param user_id defaults to a randomly-generated 16-byte string. Override it
         to specify IDs from your user database.
@@ -299,7 +299,7 @@ module Simple : sig
       Example usage in server:
 
       {[
-      let options = Simple.generate_registration_options ...  in
+      let options = Simple.generate_registration_options ... in
       ...
 
       options
@@ -309,8 +309,9 @@ module Simple : sig
       ]}
 
       Browsers can now use
-      {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/parseCreationOptionsFromJSON_static} PublicKeyCredential.parseCreationOptionsFromJSON}
-      to decode the JSON into the options object:
+      {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/parseCreationOptionsFromJSON_static}
+      PublicKeyCredential.parseCreationOptionsFromJSON} to decode the JSON into
+      the options object:
 
       {@javascript[
       const optionsStr = await fetch(...);
@@ -352,7 +353,7 @@ module Simple : sig
       a JSON string and then decoded in the browser. Parameters are as described
       here:
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions#instance_properties}
-        https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions#instance_properties}
+      https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions#instance_properties}
 
       Example usage in server:
 
@@ -367,8 +368,9 @@ module Simple : sig
       ]}
 
       Browsers can now use
-      {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/parseRequestOptionsFromJSON_static} PublicKeyCredential.parseRequestOptionsFromJSON}
-      to decode the JSON into the options object:
+      {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/parseRequestOptionsFromJSON_static}
+      PublicKeyCredential.parseRequestOptionsFromJSON} to decode the JSON into
+      the options object:
 
       {@javascript[
       const optionsStr = await fetch(...);
