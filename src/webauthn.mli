@@ -1,11 +1,13 @@
 (** WebAuthn - authenticating users to services using public key cryptography
 
+    For a simple passkey-focused API, see the {!Simple} module.
+
     WebAuthn is a web standard published by the W3C. Its goal is to
     standardize an interfacefor authenticating users to web-based
     applications and services using public key cryptography. Modern web
     browsers support WebAuthn functionality.
 
-    WebAuthn provides two funcitons: register and authenticate. Usually the
+    WebAuthn provides two functions: register and authenticate. Usually the
     public and private keypair is stored on an external token (Yuikey etc.)
     or part of the platform (TPM). After the public key is registered, it can
     be used to authenticate to the same service.
@@ -29,13 +31,16 @@
 (** The type of a webauthn state, containing the [origin]. *)
 type t
 
-(** [create origin] is a webauthn state, or an error if [origin] does not
+(** [create ?name origin] is a webauthn state for a relying party [name] (default
+    ["localhost"]) and hostname [origin], or an error if the [origin] does not
     meet the specification: schema must be https, the host must be a valid
     hostname. An optional port is supported: https://example.com:4444
 
     For local development purposes, it is allowed to specify an origin with
-    scheme [http] {e and} host [localhost]. *)
-val create : string -> (t, string) result
+    scheme [http] {e and} host [localhost].
+
+    @since 0.3.0 added param name *)
+val create : ?name:string -> string -> (t, string) result
 
 (** [rpid t] is the relying party ID. Specifically, it is the effective domain
     of the origin. Using registrable domain suffix as the relying party ID is
@@ -184,3 +189,220 @@ val decode_transport : string -> (transport list, [> `Msg of string ]) result
     [certificate].  *)
 val transports_of_cert : X509.Certificate.t ->
   (transport list, [> `Msg of string]) result
+
+(** Simplified interface on top of the above module, providing four main
+    operations:
+
+    - {!Simple.generate_registration_options}
+    - {!Simple.verify_registration_response}
+    - {!Simple.generate_authentication_options}
+    - {!Simple.verify_authentication_response}
+
+    The 'verify' functions raise [Invalid_argument] in case any of the
+    verification steps fails.
+
+    @since 0.3.0 *)
+module Simple : sig
+  (** {2 JSON objects}
+
+      These declarations are needed for JSON encoding. You can skip ahead to
+      {!reg} and {!auth} which will create these for you. *)
+
+  type credential = { id : string; type_ : string }
+  type cred_param = { type_ : string; alg : int }
+  type rp = { id : string; name : string }
+
+  type user = {
+    id : string;
+    name : string;
+    display_name : string;
+  }
+
+  type public_key_credential_creation_options = {
+    attestation : string option;
+    attestation_formats : string list;
+    challenge : challenge;
+    exclude_credentials : credential list;
+    pub_key_cred_params : cred_param list;
+    rp : rp;
+    timeout : float option;
+    user : user;
+  } [@@deriving to_yojson]
+
+  type public_key_credential_request_options = {
+    allow_credentials : credential list;
+    challenge : challenge;
+    rp_id : string;
+    timeout : float option;
+    user_verification : string option;
+  } [@@deriving to_yojson]
+
+  (** {2 Passkeys storage} *)
+
+  type pub_key = Mirage_crypto_ec.P256.Dsa.pub
+
+  type passkey = {
+    credential_id : string;
+    (** Use this as the lookup key when storing passkeys. *)
+
+    user_id : string;
+    (** Foreign key referencing the users table. *)
+
+    pub_key : pub_key;
+    aaguid : string;
+
+    counter : Int32.t;
+    (** Increment this after each successful authentication ceremony. *)
+
+    created_at : float;
+    (** Current time on server at creation using [Unix.time ()]. *)
+
+    last_used : float;
+    (** Update this timestamp after each authentication ceremony. *)
+  } [@@deriving yojson { exn = true }]
+  (** Store this in persistent storage. Values can be converted into JSON strings
+      using [passkey |> Simple.passkey_to_yojson |> Yojson.Safe.to_string]. And
+      converted from JSON strings using
+      [str |> Yojson.Safe.from_string |> Simple.passkey_of_yojson_exn].
+
+      Suggested storage schema (adapt to your needs):
+
+      {[
+      create table passkey (
+        id text primary key,
+        user_id text not null foreign key references user (id),
+        json text not null
+      );
+      ]} *)
+
+  (** {2:reg Registration ceremony} *)
+
+  val generate_registration_options :
+    ?attestation:string ->
+    ?attestation_formats:string list ->
+    ?exclude_credentials:credential list ->
+    ?pub_key_cred_params:cred_param list ->
+    ?timeout:float ->
+    ?user_id:string ->
+    user_name:string ->
+    display_name:string ->
+    t ->
+    public_key_credential_creation_options
+  (** [generate_registration_options ?attestation ?attestation_formats
+      ?exclude_credentials ?pub_key_cred_params ?timeout ?user_id ~user_name
+      ~display_name webauthn] is an options object that can be encoded into a
+      JSON string and then decoded in the browser. Parameters are as described
+      here:
+      {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
+        https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
+
+      @param user_id defaults to a randomly-generated 16-byte string. Override it
+        to specify IDs from your user database.
+      @param attestation_formats defaults to [fido-u2f]
+      @param pub_key_cred_params defaults to [{"type": "public-key", "alg": -7}]
+
+      Example usage in server:
+
+      {[
+      let options = Simple.generate_registration_options ...  in
+      ...
+
+      options
+      |> Simple.public_key_credential_creation_options_to_yojson
+      |> Yojson.Safe.to_string
+      |> Dream.json ~headers:["Cache-Control", "no-store"]
+      ]}
+
+      Browsers can now use
+      {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/parseCreationOptionsFromJSON_static} PublicKeyCredential.parseCreationOptionsFromJSON}
+      to decode the JSON into the options object:
+
+      {@javascript[
+      const optionsStr = await fetch(...);
+      const optionsJson = await optionsStr.json();
+      const options = PublicKeyCredential.parseCreationOptionsFromJSON(optionsJson);
+      const credential = await navigator.credentials.create({ publicKey: options });
+      ]} *)
+
+  val verify_registration_response :
+    expected_challenge:challenge ->
+    user_id:string ->
+    string ->
+    t ->
+    passkey
+  (** [verify_registration_response ~expected_challenge ~user_id response
+      webauthn] is a passkey constructed after verifying the registration
+      response.
+
+      The [response] can be obtained with something like this:
+
+      {@javascript[
+      const credential = await navigator.credentials.create({ publicKey: options });
+      const response = JSON.stringify(credential.toJSON().response);
+      // Upload response to server
+      ]}
+
+      @raise Invalid_argument if registration verification fails. *)
+
+  (** {2:auth Authentication ceremony} *)
+
+  val generate_authentication_options :
+    ?allow_credentials:credential list ->
+    ?timeout:float ->
+    ?user_verification:string ->
+    t ->
+    public_key_credential_request_options
+  (** [generate_authentication_options ?allow_credentials ?timeout
+      ?user_verification webauthn] is an options object that can be encoded into
+      a JSON string and then decoded in the browser. Parameters are as described
+      here:
+      {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions#instance_properties}
+        https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions#instance_properties}
+
+      Example usage in server:
+
+      {[
+      let options = Simple.generate_authentication_options webauthn in
+      ...
+
+      options
+      |> Simple.public_key_credential_request_options_to_yojson
+      |> Yojson.Safe.to_string
+      |> Dream.json ~headers:["Cache-Control", "no-store"])
+      ]}
+
+      Browsers can now use
+      {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/parseRequestOptionsFromJSON_static} PublicKeyCredential.parseRequestOptionsFromJSON}
+      to decode the JSON into the options object:
+
+      {@javascript[
+      const optionsStr = await fetch(...);
+      const optionsJson = await optionsStr.json();
+      const options = PublicKeyCredential.parseRequestOptionsFromJSON(optionsJson);
+      const credential = await navigator.credentials.get({ publicKey: options });
+      ]} *)
+
+  val verify_authentication_response :
+    expected_challenge:challenge ->
+    pub_key:pub_key ->
+    string ->
+    t ->
+    authentication
+  (** [verify_authentication_response ~expected_challenge ~pub_key response
+      webauthn] is an [authentication] object constructed after verifying the
+      authentication response.
+
+      The [response] can be obtained with something like this:
+
+      {@javascript[
+      const credential = await navigator.credentials.get({ publicKey: options });
+      const response = JSON.stringify(credential.toJSON().response);
+      // Upload credential.id and response to server
+      ]}
+
+      The [pub_key] can be obtained by looking up the stored passkey
+      corresponding to [credential.id] obtained from the above JavaScript snippet,
+      and getting its public key.
+
+      @raise Invalid_argument if authentication verification fails. *)
+end
