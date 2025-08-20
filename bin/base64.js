@@ -1,4 +1,4 @@
-var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 
 ;(function (exports) {
   'use strict'
@@ -12,13 +12,13 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
   var NUMBER = '0'.charCodeAt(0)
   var LOWER = 'a'.charCodeAt(0)
   var UPPER = 'A'.charCodeAt(0)
-  var PLUS_URL_SAFE = '-'.charCodeAt(0)
-  var SLASH_URL_SAFE = '_'.charCodeAt(0)
+  var DASH = '-'.charCodeAt(0)
+  var UNDERSCORE = '_'.charCodeAt(0)
 
   function decode (elt) {
     var code = elt.charCodeAt(0)
-    if (code === PLUS || code === PLUS_URL_SAFE) return 62 // '+'
-    if (code === SLASH || code === SLASH_URL_SAFE) return 63 // '/'
+    if (code === DASH) return 62 // '-'
+    if (code === UNDERSCORE) return 63 // '_'
     if (code < NUMBER) return -1 // no match
     if (code < NUMBER + 10) return code - NUMBER + 26 + 26
     if (code < UPPER + 26) return code - UPPER
@@ -26,21 +26,14 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
   }
 
   function b64ToByteArray (b64) {
-    var i, j, l, tmp, placeHolders, arr
+    var i, j, l, tmp, slack, arr
 
-    // the number of equal signs (place holders)
-    // if there are two placeholders, than the two characters before it
-    // represent one byte
-    // if there is only one, then the three characters before it represent 2 bytes
-    // this is just a cheap hack to not do indexOf twice
     var len = b64.length
-    placeHolders = b64.charAt(len - 2) === '=' ? 2 : b64.charAt(len - 1) === '=' ? 1 : 0
+    slack = len % 4
 
-    // base64 is 4/3 + up to two characters of the original data
-    arr = new Arr(b64.length * 3 / 4 - placeHolders)
+    arr = new Arr(b64.length * 3 / 4)
 
-    // if there are placeholders, only get up to the last complete 4 chars
-    l = placeHolders > 0 ? b64.length - 4 : b64.length
+    l = b64.length - slack;
 
     var L = 0
 
@@ -55,10 +48,10 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
       push(tmp & 0xFF)
     }
 
-    if (placeHolders === 2) {
+    if (slack === 2) {
       tmp = (decode(b64.charAt(i)) << 2) | (decode(b64.charAt(i + 1)) >> 4)
       push(tmp & 0xFF)
-    } else if (placeHolders === 1) {
+    } else if (slack === 3) {
       tmp = (decode(b64.charAt(i)) << 10) | (decode(b64.charAt(i + 1)) << 4) | (decode(b64.charAt(i + 2)) >> 2)
       push((tmp >> 8) & 0xFF)
       push(tmp & 0xFF)
@@ -87,20 +80,17 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
       output += tripletToBase64(temp)
     }
 
-    // pad the end with zeros, but make sure to not forget the extra bytes
     switch (extraBytes) {
       case 1:
         temp = uint8[uint8.length - 1]
         output += encode(temp >> 2)
         output += encode((temp << 4) & 0x3F)
-        output += '=='
         break
       case 2:
         temp = (uint8[uint8.length - 2] << 8) + (uint8[uint8.length - 1])
         output += encode(temp >> 10)
         output += encode((temp >> 4) & 0x3F)
         output += encode((temp << 2) & 0x3F)
-        output += '='
         break
       default:
         break
