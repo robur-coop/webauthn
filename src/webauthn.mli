@@ -395,9 +395,9 @@ module Simple : sig
       // Upload credential.id and response to server
       ]}
 
-      The [pub_key] can be obtained by looking up the stored passkey
-      corresponding to [credential.id] obtained from the above JavaScript snippet,
-      and getting its public key.
+      The [pub_key] can be obtained by looking up the stored {!passkey}
+      corresponding to [credential.id] obtained from the client, and getting its
+      public key.
 
       @raise Invalid_argument if authentication verification fails. *)
 end
