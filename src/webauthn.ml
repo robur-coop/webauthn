@@ -66,10 +66,12 @@ type t = {
 
 type challenge = string
 
+let b64_urlenc = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+
 let generate_challenge ?(size = 32) () =
-  if size < 16 then invalid_arg "size must be at least 16 bytes";
+  (if size < 16 then invalid_arg "size must be at least 16 bytes");
   let ch = Mirage_crypto_rng.generate size in
-  ch, Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet ch
+  ch, b64_urlenc ch
 
 let challenge_to_string c = c
 let challenge_of_string s = Some s
@@ -483,14 +485,12 @@ let transports_of_cert c =
     (fun (_, data) -> decode_transport data)
 
 module Simple = struct
-  let b64enc str = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet str
-
-  let b64dec str =
+  let b64_urldec str =
     match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet str with
     | Ok s -> s
     | Error (`Msg m) -> failwith m
 
-  let challenge_to_yojson c = `String (c |> challenge_to_string |> b64enc)
+  let challenge_to_yojson c = `String (c |> challenge_to_string |> b64_urlenc)
 
   type credential = { id : string; type_ : string [@key "type"] } [@@deriving to_yojson]
   type cred_param = { type_ : string [@key "type"]; alg : int } [@@deriving to_yojson]
@@ -526,12 +526,12 @@ module Simple = struct
   let pub_key_to_yojson pk = `String (
     pk
     |> Mirage_crypto_ec.P256.Dsa.pub_to_octets
-    |> b64enc
+    |> b64_urlenc
   )
 
   let pub_key_of_yojson = function
     | `String s ->
-      (match Mirage_crypto_ec.P256.Dsa.pub_of_octets (b64dec s) with
+      (match Mirage_crypto_ec.P256.Dsa.pub_of_octets (b64_urldec s) with
       | Ok pk -> Ok pk
       | Error _ -> Error "invalid public key")
     | _ -> Error "invalid public key"
@@ -554,7 +554,7 @@ module Simple = struct
     ~user_name
     ~display_name
     webauthn =
-    let user_id = b64enc user_id in
+    let user_id = b64_urlenc user_id in
     {
       attestation;
       attestation_formats = ["fido-u2f"];
@@ -583,7 +583,7 @@ module Simple = struct
     let created_at = Unix.time () in
     {
       user_id;
-      credential_id = b64enc registration.attested_credential_data.credential_id;
+      credential_id = b64_urlenc registration.attested_credential_data.credential_id;
       pub_key = registration.attested_credential_data.public_key;
       aaguid = registration.attested_credential_data.aaguid;
       counter = registration.sign_count;
