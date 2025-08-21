@@ -59,16 +59,19 @@ let pp_error ppf = function
   | `Signature_verification msg -> Fmt.pf ppf "signature verification failed %s" msg
 
 type t = {
+  name : string;
   origin : string;
   rpid : [`host] Domain_name.t;
 }
 
 type challenge = string
 
+let b64_urlenc = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+
 let generate_challenge ?(size = 32) () =
-  if size < 16 then invalid_arg "size must be at least 16 bytes";
+  (if size < 16 then invalid_arg "size must be at least 16 bytes");
   let ch = Mirage_crypto_rng.generate size in
-  ch, Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet ch
+  ch, b64_urlenc ch
 
 let challenge_to_string c = c
 let challenge_of_string s = Some s
@@ -258,7 +261,7 @@ let json_assoc thing : Yojson.Safe.t -> ((string * Yojson.Safe.t) list, _) resul
   | `Assoc s -> Ok s
   | json -> Error (`Json_decoding (thing, "non-assoc", Yojson.Safe.to_string json))
 
-let create origin =
+let create ?(name="localhost") origin =
   match String.split_on_char '/' origin with
   | [ proto ; "" ; host_port ]
       when proto = "https:" || proto = "http:" && (String.equal host_port "localhost" || String.starts_with ~prefix:"localhost:" host_port) ->
@@ -280,7 +283,7 @@ let create origin =
                       with Failure _ -> Error ("invalid port " ^ port)))
         | _ -> Error ("invalid origin host and port " ^ host_port)
       with
-      | Ok host -> Ok { origin ; rpid = host }
+      | Ok host -> Ok { name ; origin ; rpid = host }
       | Error _ as e -> e
     end
   | _ ->  Error ("invalid origin " ^ origin)
@@ -480,3 +483,135 @@ let transports_of_cert c =
     (Option.to_result ~none:(`Msg "extension not present")
       (X509.Extension.(find (Unsupported fido_u2f_transport_oid) (X509.Certificate.extensions c))))
     (fun (_, data) -> decode_transport data)
+
+module Simple = struct
+  let b64_urldec str =
+    match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet str with
+    | Ok s -> s
+    | Error (`Msg m) -> failwith m
+
+  let challenge_to_yojson c = `String (c |> challenge_to_string |> b64_urlenc)
+
+  type credential = { id : string; type_ : string [@key "type"] } [@@deriving to_yojson]
+  type cred_param = { type_ : string [@key "type"]; alg : int } [@@deriving to_yojson]
+  type rp = { id : string; name : string } [@@deriving to_yojson]
+
+  type user = {
+    id : string;
+    name : string;
+    display_name : string [@key "displayName"];
+  } [@@deriving to_yojson]
+
+  type public_key_credential_creation_options = {
+    attestation : string option [@default None];
+    attestation_formats : string list [@key "attestationFormats"] [@default []];
+    challenge : challenge;
+    exclude_credentials : credential list [@key "excludeCredentials"] [@default []];
+    pub_key_cred_params : cred_param list [@key "pubKeyCredParams"] [@default []];
+    rp : rp;
+    timeout : (float option [@default None]);
+    user : user;
+  } [@@deriving to_yojson]
+
+  type public_key_credential_request_options = {
+    allow_credentials : credential list [@key "allowCredentials"] [@default []];
+    challenge : challenge;
+    rp_id : string [@key "rpId"];
+    timeout : float option [@default None];
+    user_verification : string option [@key "userVerification"] [@default None];
+  } [@@deriving to_yojson]
+
+  type pub_key = Mirage_crypto_ec.P256.Dsa.pub
+
+  let pub_key_to_yojson pk = `String (
+    pk
+    |> Mirage_crypto_ec.P256.Dsa.pub_to_octets
+    |> b64_urlenc
+  )
+
+  let pub_key_of_yojson = function
+    | `String s ->
+      (match Mirage_crypto_ec.P256.Dsa.pub_of_octets (b64_urldec s) with
+      | Ok pk -> Ok pk
+      | Error _ -> Error "invalid public key")
+    | _ -> Error "invalid public key"
+
+  type passkey = {
+    credential_id : string;
+    user_id : string;
+    pub_key : pub_key;
+    aaguid : string;
+    counter : Int32.t;
+    created_at : float;
+    last_used : float;
+  } [@@deriving yojson { strict = false; exn = true }]
+
+  let generate_registration_options
+    ?attestation
+    ?(exclude_credentials=[])
+    ?timeout
+    ?(user_id=Mirage_crypto_rng.generate 16)
+    ~user_name
+    ~display_name
+    webauthn =
+    let user_id = b64_urlenc user_id in
+    {
+      attestation;
+      attestation_formats = ["fido-u2f"];
+      challenge = fst (generate_challenge ());
+      exclude_credentials;
+      pub_key_cred_params = [{ type_ = "public-key"; alg = -7 }];
+      rp = { id = rpid webauthn; name = webauthn.name };
+      timeout;
+      user = { id = user_id; name = user_name; display_name = display_name };
+    }
+
+  let or_invalid = function
+    | Ok v -> v
+    | Error e -> Fmt.kstr invalid_arg "error: %a" pp_error e
+
+  let verify_registration_response ~expected_challenge ~user_id response webauthn =
+    let challenge, registration = response
+      |> register_response_of_string
+      |> or_invalid
+      |> register webauthn
+      |> or_invalid
+    in
+    (if expected_challenge |> challenge_equal challenge |> not
+    then invalid_arg "verify_registration_response: challenge mismatch");
+
+    let created_at = Unix.time () in
+    {
+      user_id;
+      credential_id = b64_urlenc registration.attested_credential_data.credential_id;
+      pub_key = registration.attested_credential_data.public_key;
+      aaguid = registration.attested_credential_data.aaguid;
+      counter = registration.sign_count;
+      created_at;
+      last_used = created_at;
+    }
+
+  let generate_authentication_options
+    ?(allow_credentials=[])
+    ?timeout
+    ?user_verification
+    webauthn = {
+    allow_credentials;
+    challenge = fst (generate_challenge ());
+    rp_id = rpid webauthn;
+    timeout;
+    user_verification;
+  }
+
+  let verify_authentication_response ~expected_challenge ~pub_key response webauthn =
+    let challenge, authentication = response
+      |> authenticate_response_of_string
+      |> or_invalid
+      |> authenticate webauthn pub_key
+      |> or_invalid
+    in
+    (if expected_challenge |> challenge_equal challenge |> not
+    then invalid_arg "verify_authentication_response: challenge mismatch");
+
+    authentication
+end
