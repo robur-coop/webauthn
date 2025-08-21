@@ -291,7 +291,7 @@ module Simple : sig
       be encoded into a JSON string and then decoded in the browser. Parameters
       are as described here:
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
-      https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
+      PublicKeyCredentialCreationOptions instance properties}
 
       @param user_id defaults to a randomly-generated 16-byte string. Override it
         to specify IDs from your user database.
@@ -353,7 +353,7 @@ module Simple : sig
       a JSON string and then decoded in the browser. Parameters are as described
       here:
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions#instance_properties}
-      https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions#instance_properties}
+      PublicKeyCredentialRequestOptions instance properties}
 
       Example usage in server:
 
