@@ -1,0 +1,6 @@
+(executable
+  (public_name webauthn_demo)
+  (name webauthn_demo)
+  (modules webauthn_demo template)
+  (libraries webauthn vif miou.unix flash_message cmdliner)
+  (optional))
