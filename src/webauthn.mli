@@ -1,7 +1,7 @@
 (** WebAuthn - authenticating users to services using public key cryptography
 
     WebAuthn is a web standard published by the W3C. Its goal is to
-    standardize an interfacefor authenticating users to web-based
+    standardize an interface for authenticating users to web-based
     applications and services using public key cryptography. Modern web
     browsers support WebAuthn functionality.
 

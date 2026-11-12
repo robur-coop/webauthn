@@ -301,7 +301,7 @@ let setup_app level port host origin tls =
   | Ok webauthn ->
     Dream.run ~port ~interface:host ~tls
     @@ Dream.logger
-    @@ Dream.memory_sessions
+    @@ Dream.memory_sessions ()
     @@ Flash_message.flash_messages
     @@ add_routes webauthn
 

@@ -45,13 +45,13 @@ let pp_error ppf = function
   | `Unsupported_elliptic_curve i ->
     Fmt.pf ppf "unsupported cose elliptic curve %d" i
   | `Unsupported_attestation_format fmt ->
-    Fmt.pf ppf "unsupported attestation format %s" fmt
+    Fmt.pf ppf "unsupported attestation format %S" fmt
   | `Invalid_public_key msg ->
     Fmt.pf ppf "invalid public key %s" msg
   | `Client_data_type_mismatch is ->
-    Fmt.pf ppf "client data type mismatch: received %s" is
+    Fmt.pf ppf "client data type mismatch: received %S" is
   | `Origin_mismatch (should, is) ->
-    Fmt.pf ppf "origin mismatch: expected %s, received %s" should is
+    Fmt.pf ppf "origin mismatch: expected %s, received %S" should is
   | `Rpid_hash_mismatch (should, is) ->
     Fmt.pf ppf "rpid hash mismatch: expected %s received %s"
       (Base64.encode_string should) (Base64.encode_string is)
